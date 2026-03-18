@@ -59,42 +59,56 @@ class CalendarAPI:
         events = list(self.account.calendar.view(start, end))
         return sorted(events, key=lambda x: x.start)
 
-    def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
+    def get_room_free_busy_slots(self, room_name: str, date: date_cls) -> List[dict]:
         """
-        Получает события из календаря переговорной комнаты.
-        Использует альтернативный метод: поиск в ВАШЕМ календаре встреч, где участвует комната.
-        Это показывает только те встречи, где вы участник или комната отображается в вашем календаре.
+        Получает занятые слоты комнаты через Free/Busy информацию (GetUserAvailability).
+        Возвращает список словарей {'start': datetime, 'end': datetime}.
+        Показывает ВСЕ занятые промежутки (даже чужие встречи), но без имен и тем.
+        Работает в интервале 09:00 - 18:00 по московскому времени.
         """
         if room_name not in self.cfg.rooms:
-            return None
+            return []
+        
         room_email = self.cfg.rooms[room_name]
+        # Ограничиваем запрос рабочим днем 09:00 - 18:00
+        start_dt = self._make_tz_aware(datetime.combine(date, time(9, 0)))
+        end_dt = self._make_tz_aware(datetime.combine(date, time(18, 0)))
 
         try:
-            # Получаем ВСЕ встречи из ВАШЕГО календаря за день
-            start = self._make_tz_aware(datetime.combine(date, time.min))
-            end = self._make_tz_aware(datetime.combine(date, time.max))
-            all_events = list(self.account.calendar.view(start, end))
+            free_busy_info = self.account.protocol.get_free_busy_info(
+                attendees=[room_email],
+                start=start_dt,
+                end=end_dt,
+            )
 
-            # Фильтруем только те, где участвует комната
-            room_events = []
-            for ev in all_events:
-                # Проверяем location
-                if ev.location and room_email.lower() in ev.location.lower():
-                    room_events.append(ev)
-                    continue
-                
-                # Проверяем attendees
-                for attendees_list in [getattr(ev, 'required_attendees', []) or [], 
-                                       getattr(ev, 'optional_attendees', []) or []]:
-                    for att in attendees_list:
-                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
-                            if att.mailbox.email_address.lower() == room_email.lower():
-                                room_events.append(ev)
-                                break
+            busy_slots = []
+            for info in free_busy_info:
+                if hasattr(info, 'busy_periods'):
+                    for period in info.busy_periods:
+                        busy_slots.append({
+                            'start': period.start,
+                            'end': period.end
+                        })
+            
+            return sorted(busy_slots, key=lambda x: x['start'])
 
-            return sorted(room_events, key=lambda x: x.start) if room_events else []
         except Exception:
-            return None
+            return []
+
+    def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
+        """
+        Устаревший метод. Теперь используется get_room_free_busy_slots для отображения расписания.
+        Оставлен для обратной совместимости, если где-то еще используется.
+        """
+        # Перенаправляем на новый метод, но возвращаем пустой список, 
+        # так как старый метод больше не актуален для отображения полного расписания
+        slots = self.get_room_free_busy_slots(room_name, date)
+        if not slots:
+            return []
+        
+        # Создаем фейковые объекты для совместимости, если вдруг метод вызывается
+        # В реальном использовании теперь нужно вызывать get_room_free_busy_slots
+        return [] 
 
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:

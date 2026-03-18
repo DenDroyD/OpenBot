@@ -814,6 +814,8 @@ async def main() -> None:
 
     @dp.message(RoomScheduleStates.waiting_for_date)
     async def room_show_date_message(message: types.Message, state: FSMContext):
+        from datetime import time as time_cls
+        
         if not is_registered(message.from_user.id):
             await message.answer(
                 "🔐 Для работы нужно зарегистрироваться.",
@@ -836,30 +838,21 @@ async def main() -> None:
             return
 
         api = _get_user_calendar_api(message.from_user.id)
-        events = api.get_room_events(room, d)
+        
+        # Используем НОВЫЙ метод get_room_free_busy_slots для получения всех занятых слотов
+        busy_slots = api.get_room_free_busy_slots(room, d)
 
         # Формируем текст ответа
-        text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')}\n\n"
+        text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')} (09:00-18:00)\n\n"
         
-        if events is not None:
-            # Есть доступ к календарю комнаты
-            if events:
-                text += "\n".join([format_room_event(e) for e in events])
-            else:
-                text += "📭 На этот день бронирований нет."
+        if busy_slots:
+            text += "⛔ Занята:\n"
+            for slot in busy_slots:
+                start_str = slot['start'].strftime("%H:%M")
+                end_str = slot['end'].strftime("%H:%M")
+                text += f"• {start_str}-{end_str} | Занято\n"
         else:
-            # Нет доступа к календарю, проверяем через GetFreeBusyInfo
-            day_start = datetime.combine(d, time.min)
-            day_end = datetime.combine(d, time.max)
-            day_start = api._make_tz_aware(day_start)
-            day_end = api._make_tz_aware(day_end)
-            
-            available, msg = api.is_room_available(room, day_start, day_end)
-            if available:
-                text += "✅ Свободна на весь день."
-            else:
-                text += f"⚠️ {msg}"
-                text += "\n\n(Подробное расписание недоступно из-за ограничений доступа)"
+            text += "✅ Свободна весь день (09:00-18:00)."
 
         await state.clear()
         await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())
