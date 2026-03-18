@@ -34,6 +34,7 @@ class CreateMeeting(StatesGroup):
     attendees = State()
     room = State()
     confirm = State()
+    change_attendee = State()  # Состояние для смены участника
 
 
 class ScheduleStates(StatesGroup):
@@ -50,6 +51,11 @@ class RescheduleMeeting(StatesGroup):
 
 class RoomScheduleStates(StatesGroup):
     waiting_for_date = State()
+
+
+class RoomAction(StatesGroup):
+    """Состояния для меню переговорок: выбор действия (расписание/бронь)"""
+    pass
 
 
 def _env(name: str, *, required: bool = True, default: str = "") -> str:
@@ -286,7 +292,7 @@ async def main() -> None:
         await state.clear()
         await message.answer("Выберите действие:", reply_markup=schedule_submenu())
 
-    @dp.message(F.text == "Сегодня")
+    @dp.message(ScheduleStates.waiting_for_date, F.text != "Назад")
     async def show_today(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
@@ -301,7 +307,7 @@ async def main() -> None:
             text = "📭 На сегодня предстоящих встреч нет."
         await message.answer(text, parse_mode="Markdown", reply_markup=schedule_submenu())
 
-    @dp.message(F.text == "Выбрать день")
+    @dp.message(ScheduleStates.waiting_for_date, F.text == "Выбрать день")
     async def ask_day(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
@@ -429,6 +435,7 @@ async def main() -> None:
             kb = InlineKeyboardBuilder()
             kb.button(text="✅ Да", callback_data="confirm_yes")
             kb.button(text="❌ Нет", callback_data="confirm_no")
+            kb.button(text="👥 Добавить участников", callback_data="add_attendees_to_booking")
             kb.adjust(2)
             
             await state.set_state(CreateMeeting.confirm)
@@ -494,6 +501,7 @@ async def main() -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="✅ Да", callback_data="confirm_yes")
         kb.button(text="❌ Нет", callback_data="confirm_no")
+        kb.button(text="🔄 Сменить участника", callback_data="change_attendee")
         kb.adjust(2)
 
         await state.set_state(CreateMeeting.confirm)
@@ -522,6 +530,13 @@ async def main() -> None:
     async def confirm_no(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("Создание встречи отменено.")
         await state.clear()
+        await callback.answer()
+
+    @dp.callback_query(F.data == "change_attendee")
+    async def change_attendee_handler(callback: types.CallbackQuery, state: FSMContext):
+        """Обработчик кнопки 'Сменить участника' - возвращает к вводу участников"""
+        await state.set_state(CreateMeeting.attendees)
+        await callback.message.edit_text("Введите участников через запятую (ФИО) или '-' если никого не добавлять:")
         await callback.answer()
 
     # ===== Переговорки =====
@@ -596,7 +611,7 @@ async def main() -> None:
         )
         await callback.answer()
 
-    @dp.message(F.text == "Сегодня")
+    @dp.message(RoomScheduleStates.waiting_for_date, F.text == "Сегодня")
     async def room_today(message: types.Message, state: FSMContext):
         data = await state.get_data()
         room = data.get("current_room")
@@ -636,7 +651,7 @@ async def main() -> None:
 
         await message.answer(text, parse_mode="Markdown")
 
-    @dp.message(F.text == "Выбрать день")
+    @dp.message(RoomScheduleStates.waiting_for_date, F.text == "Выбрать день")
     async def room_choose_day(message: types.Message, state: FSMContext):
         data = await state.get_data()
         if not data.get("current_room"):
@@ -649,7 +664,7 @@ async def main() -> None:
         await state.set_state(RoomScheduleStates.waiting_for_date)
         await message.answer("Напишите интересующий день (например: завтра, 15 марта, следующий четверг).")
 
-    @dp.message(RoomScheduleStates.waiting_for_date)
+    @dp.message(RoomScheduleStates.waiting_for_date, F.text != "Назад")
     async def room_show_date(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
