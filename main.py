@@ -58,6 +58,11 @@ class RoomAction(StatesGroup):
     pass
 
 
+class BookingStates(StatesGroup):
+    """Состояния для бронирования переговорки"""
+    waiting_for_subject = State()
+
+
 def _env(name: str, *, required: bool = True, default: str = "") -> str:
     v = os.environ.get(name, default).strip()
     if required and not v:
@@ -868,11 +873,23 @@ async def main() -> None:
             await callback.answer()
             return
 
-        # Устанавливаем тему по умолчанию для быстрого бронирования
-        await state.update_data(book_room=room, subject=f"Бронь {room}")
-        await state.set_state(CreateMeeting.date)
-        await callback.message.edit_text(f"📝 Когда забронировать {room}? (например: завтра, 15 марта)")
+        # Сохраняем комнату и переходим к запросу темы
+        await state.update_data(book_room=room)
+        await state.set_state(BookingStates.waiting_for_subject)
+        await callback.message.edit_text(f"📝 Введите тему встречи для брони {room}:")
         await callback.answer()
+
+    @dp.message(BookingStates.waiting_for_subject)
+    async def booking_subject_handler(message: types.Message, state: FSMContext):
+        """Обработчик ввода темы при бронировании переговорки"""
+        subject = message.text.strip()
+        if not subject:
+            await message.answer("Тема не может быть пустой. Введите тему:")
+            return
+        
+        await state.update_data(subject=subject)
+        await state.set_state(CreateMeeting.date)
+        await message.answer("📅 Когда забронировать? (например: завтра, 15 марта)")
 
     @dp.callback_query(F.data.startswith("confirm_yes"))
     async def confirm_create_from_booking(callback: types.CallbackQuery, state: FSMContext):
