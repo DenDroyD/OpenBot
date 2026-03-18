@@ -31,8 +31,9 @@ def filter_future_events(events, current_dt: datetime):
 
 
 def format_event(event) -> str:
-    start = event.start.strftime("%H:%M")
-    end = event.end.strftime("%H:%M")
+    tz = pytz.timezone("Europe/Moscow")
+    start = event.start.astimezone(tz).strftime("%H:%M")
+    end = event.end.astimezone(tz).strftime("%H:%M")
     subject = event.subject or "Без темы"
     location = f"📍 {event.location}" if getattr(event, "location", None) else ""
     organizer = ""
@@ -43,8 +44,9 @@ def format_event(event) -> str:
 
 
 def format_room_event(event) -> str:
-    start = event.start.strftime("%H:%M")
-    end = event.end.strftime("%H:%M")
+    tz = pytz.timezone("Europe/Moscow")
+    start = event.start.astimezone(tz).strftime("%H:%M")
+    end = event.end.astimezone(tz).strftime("%H:%M")
     subject = event.subject or "Без темы"
     organizer = ""
     if getattr(event, "organizer", None):
