@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from rapidfuzz import fuzz, process
@@ -87,6 +87,7 @@ def find_employee_by_fio(
     1. Сначала пробуем точное совпадение
     2. Если введено 2+ слова - ищем по фамилии (первое слово) + имя
     3. Используем fuzzy search с приоритетом на совпадение фамилии
+    Возвращает список всех найденных совпадений при неоднозначности.
     """
     q = (fio_query or "").strip().lower()
     if not q:
@@ -130,4 +131,39 @@ def find_employee_by_fio(
         return None
     key, score, _ = match
     return fio_index[key], int(score)
+
+
+def find_employees_by_fio_multiple(
+    fio_query: str,
+    fio_index: Dict[str, Employee],
+    *,
+    limit: int = 5,
+    score_cutoff: int = 60,
+) -> List[Tuple[Employee, int]]:
+    """
+    Поиск нескольких сотрудников по ФИО для выбора пользователем.
+    Возвращает список кортежей (Employee, score).
+    """
+    from rapidfuzz import process, fuzz
+    
+    q = (fio_query or "").strip().lower()
+    if not q:
+        return []
+    
+    choices = list(fio_index.keys())
+    parts = q.split()
+    
+    # Если введено 2+ слова, приоритезируем поиск по фамилии
+    if len(parts) >= 2:
+        surname = parts[0]
+        surname_matches = [c for c in choices if c.startswith(surname)]
+        
+        if surname_matches:
+            # Ищем среди совпадений по фамилии
+            matches = process.extract(q, surname_matches, scorer=fuzz.WRatio, score_cutoff=score_cutoff, limit=limit)
+            return [(fio_index[key], int(score)) for key, score, _ in matches]
+    
+    # Общий поиск
+    matches = process.extract(q, choices, scorer=fuzz.WRatio, score_cutoff=score_cutoff, limit=limit)
+    return [(fio_index[key], int(score)) for key, score, _ in matches]
 

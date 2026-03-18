@@ -177,6 +177,27 @@ def _resolve_attendees_to_emails(raw: str) -> Tuple[List[str], List[str]]:
     return emails, warnings
 
 
+async def _select_attendee_from_multiple(
+    message: types.Message,
+    state: FSMContext,
+    query: str,
+    matches: List[Tuple[object, int]],
+) -> None:
+    """
+    Показать пользователю список найденных сотрудников для выбора.
+    """
+    builder = InlineKeyboardBuilder()
+    for idx, (emp, score) in enumerate(matches):
+        builder.button(text=f"{emp.fio} ({score}%)", callback_data=f"emp_select_{idx}_{query}")
+    builder.button(text="🔙 Ввести заново", callback_data="emp_reenter")
+    builder.adjust(1)
+    
+    await message.answer(
+        f"Найдено несколько совпадений для '{query}'. Выберите сотрудника:",
+        reply_markup=builder.as_markup()
+    )
+
+
 async def startup() -> None:
     global CTX
     init_db()
@@ -289,10 +310,10 @@ async def main() -> None:
     async def schedule_menu(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
-        await state.clear()
+        await state.set_state(ScheduleStates.waiting_for_date)
         await message.answer("Выберите действие:", reply_markup=schedule_submenu())
 
-    @dp.message(ScheduleStates.waiting_for_date, F.text != "Назад")
+    @dp.message(ScheduleStates.waiting_for_date, F.text == "Сегодня")
     async def show_today(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
@@ -311,7 +332,6 @@ async def main() -> None:
     async def ask_day(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
-        await state.set_state(ScheduleStates.waiting_for_date)
         await message.answer("Напишите интересующий день (например: завтра, 15 марта, следующий четверг).")
 
     @dp.message(F.text == "Назад")
@@ -339,7 +359,6 @@ async def main() -> None:
             text = f"📅 **{date_desc}**\n\n" + "\n".join([format_event(e) for e in events])
         else:
             text = f"📭 На {date_desc} встреч нет."
-        await state.clear()
         await message.answer(text, parse_mode="Markdown", reply_markup=schedule_submenu())
 
     # ===== Создание встречи =====
@@ -561,7 +580,8 @@ async def main() -> None:
             attendees_emails=data.get("attendees", []),
             room_name=data.get("room"),
         )
-        await callback.message.edit_text(msg, reply_markup=main_menu())
+        # После создания встречи показываем сообщение и возвращаем в главное меню
+        await callback.message.answer(msg, reply_markup=main_menu())
         await state.clear()
         await callback.answer()
 
@@ -843,7 +863,8 @@ async def main() -> None:
             room_name=room_name,
         )
         
-        await callback.message.edit_text(msg, reply_markup=main_menu())
+        # После создания встречи показываем сообщение и возвращаем в главное меню
+        await callback.message.answer(msg, reply_markup=main_menu())
         await state.clear()
         await callback.answer()
 

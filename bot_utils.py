@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List
 
 import dateparser
@@ -8,6 +8,18 @@ tz = pytz.timezone("Europe/Moscow")
 
 
 def parse_natural_date(text: str):
+    """
+    Парсит дату из естественного языка.
+    Для слова 'сегодня' возвращаем текущую дату независимо от TIMEZONE.
+    """
+    text_lower = text.strip().lower()
+    
+    # Обработка специальных случаев
+    if text_lower == "сегодня":
+        return datetime.now(tz).date()
+    elif text_lower == "завтра":
+        return (datetime.now(tz) + timedelta(days=1)).date()
+    
     settings = {
         "PREFER_DATES_FROM": "future",
         "TIMEZONE": "Europe/Moscow",
