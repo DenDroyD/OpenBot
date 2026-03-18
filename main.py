@@ -479,22 +479,35 @@ async def main() -> None:
         await message.answer("Выбери переговорку:", reply_markup=builder.as_markup())
 
     @dp.callback_query(F.data.startswith("info_"))
-    async def room_info(callback: types.CallbackQuery, state: FSMContext):
-        if not await _ensure_registered(callback.message, state):
-            return
-        api = _get_user_calendar_api(callback.from_user.id)
-        room = "Москва" if callback.data == "info_msk" else "СПб"
-        if room == "Москва":
-            events = api.get_room_events(room, get_current_datetime_msk().date())
-            text = "🏢 **Москва**\n\n"
-            if events:
-                text += "Сегодня занято:\n" + "\n".join([format_room_event(e) for e in events])
-            else:
-                text += "Сегодня свободна."
-        else:
-            text = "🏢 **СПб**\n\n⚠️ Чтение календаря СПб недоступно через EWS без прав. Можно бронировать «вслепую»."
-        await callback.message.edit_text(text, parse_mode="Markdown")
+async def room_info(callback: types.CallbackQuery, state: FSMContext):
+    # Проверяем регистрацию по ID пользователя, а не по сообщению
+    if not is_registered(callback.from_user.id):
+        await callback.message.answer(
+            "🔐 Для работы нужно зарегистрироваться.\n\n"
+            "1) Подтвердите номер телефона (кнопка ниже)\n"
+            "2) Затем введите логин (например: a.leonov)\n"
+            "3) Затем пароль от Outlook/Exchange\n\n"
+            "Я сверю телефон по списку сотрудников.",
+            reply_markup=registration_keyboard(),
+        )
+        await state.set_state(RegisterStates.waiting_for_contact)
         await callback.answer()
+        return
+
+    # Основной код, который уже был
+    api = _get_user_calendar_api(callback.from_user.id)
+    room = "Москва" if callback.data == "info_msk" else "СПб"
+    if room == "Москва":
+        events = api.get_room_events(room, get_current_datetime_msk().date())
+        text = "🏢 **Москва**\n\n"
+        if events:
+            text += "Сегодня занято:\n" + "\n".join([format_room_event(e) for e in events])
+        else:
+            text += "Сегодня свободна."
+    else:
+        text = "🏢 **СПб**\n\n⚠️ Чтение календаря СПб недоступно через EWS без прав. Можно бронировать «вслепую»."
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.answer()
 
     # ===== Удалить/перенести =====
     @dp.message(F.text == "🗑 Удалить/перенести")
