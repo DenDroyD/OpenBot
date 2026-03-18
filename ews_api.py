@@ -97,18 +97,31 @@ class CalendarAPI:
 
     def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
         """
-        Устаревший метод. Теперь используется get_room_free_busy_slots для отображения расписания.
-        Оставлен для обратной совместимости, если где-то еще используется.
+        Получает события из календаря комнаты.
+        Основной метод: Прямое подключение к ящику комнаты с правами DELEGATE.
+        Это позволяет видеть ВСЕ встречи в комнате (тему, организатора, время),
+        если у вашего аккаунта есть права на чтение календаря комнаты (как в Outlook).
         """
-        # Перенаправляем на новый метод, но возвращаем пустой список, 
-        # так как старый метод больше не актуален для отображения полного расписания
-        slots = self.get_room_free_busy_slots(room_name, date)
-        if not slots:
-            return []
-        
-        # Создаем фейковые объекты для совместимости, если вдруг метод вызывается
-        # В реальном использовании теперь нужно вызывать get_room_free_busy_slots
-        return [] 
+        if room_name not in self.cfg.rooms:
+            return None
+        room_email = self.cfg.rooms[room_name]
+
+        # Попытка прямого доступа к календарю комнаты
+        try:
+            room_account = Account(
+                primary_smtp_address=room_email,
+                config=self.account.config,
+                autodiscover=False,
+                access_type=DELEGATE,
+            )
+            start = self._make_tz_aware(datetime.combine(date, time.min))
+            end = self._make_tz_aware(datetime.combine(date, time.max))
+            events = list(room_account.calendar.view(start, end))
+            # Если получили список (даже пустой), возвращаем его
+            return sorted(events, key=lambda x: x.start)
+        except Exception as e:
+            # Если прямой доступ не сработал, возвращаем пустой список
+            return [] 
 
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:

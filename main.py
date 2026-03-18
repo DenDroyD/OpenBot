@@ -748,31 +748,34 @@ async def main() -> None:
         current_dt = get_current_datetime_msk()
         today = current_dt.date()
 
+        # Сначала пробуем получить детальные события через прямой доступ
         events = api.get_room_events(room, today)
         
         # Формируем текст ответа
         text = f"🏢 **{room}** – сегодня, {today.strftime('%d.%m.%Y')} (предстоящие)\n\n"
         
-        if events is not None:
-            # Есть доступ к календарю комнаты, показываем события
+        # Если получили события (список не пустой), показываем их
+        if events and len(events) > 0:
             future_events = [ev for ev in events if ev.end > current_dt]
             if future_events:
                 text += "\n".join([format_room_event(e) for e in future_events])
             else:
                 text += "📭 На сегодня предстоящих бронирований нет."
         else:
-            # Нет доступа к календарю, проверяем занятость через GetFreeBusyInfo
-            # Проверяем весь день с 00:00 до 23:59
-            day_start = current_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = current_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            # Если событий нет или доступ не получен, используем Free/Busy для проверки занятости
+            busy_slots = api.get_room_free_busy_slots(room, today)
             
-            available, msg = api.is_room_available(room, day_start, day_end)
-            if available:
-                text += "✅ Свободна на весь день."
+            # Фильтруем только будущие слоты
+            future_slots = [s for s in busy_slots if s['end'] > current_dt]
+            
+            if future_slots:
+                text += "⛔ Занята:\n"
+                for slot in future_slots:
+                    start_str = slot['start'].strftime("%H:%M")
+                    end_str = slot['end'].strftime("%H:%M")
+                    text += f"• {start_str}-{end_str} | Занято\n"
             else:
-                # msg содержит информацию о занятости
-                text += f"⚠️ {msg}"
-                text += "\n\n(Подробное расписание недоступно из-за ограничений доступа)"
+                text += "✅ Свободна на весь день."
 
         # Возвращаем меню расписания
         builder = InlineKeyboardBuilder()
