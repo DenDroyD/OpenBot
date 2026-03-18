@@ -61,72 +61,34 @@ class CalendarAPI:
 
     def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
         """
-        Получает события комнаты за весь день.
-        Пытается получить через прямой доступ к календарю комнаты.
-        Если нет прав доступа, использует альтернативный метод через поиск встреч с комнатой.
-        
-        Возвращает:
-        - Список событий, если есть доступ к календарю комнаты.
-        - Список событий из основного календаря, где участвует комната (если прямой доступ невозможен).
-        - None, если ни один метод не сработал.
+        Получает события из календаря переговорной комнаты.
+        Использует прямой доступ к календарю комнаты с правами делегата.
         """
         if room_name not in self.cfg.rooms:
             return None
         room_email = self.cfg.rooms[room_name]
-        
-        # Метод 1: Прямой доступ к календарю комнаты
+
         try:
+            # Создаем аккаунт для доступа к календарю комнаты
+            # Используем те же креды и конфиг, что и для основного пользователя
+            # access_type=DELEGATE позволяет видеть все встречи, если у пользователя есть права
             room_account = Account(
                 primary_smtp_address=room_email,
                 config=self.account.config,
                 autodiscover=False,
                 access_type=DELEGATE,
             )
+            
             start = self._make_tz_aware(datetime.combine(date, time.min))
             end = self._make_tz_aware(datetime.combine(date, time.max))
+            
             events = list(room_account.calendar.view(start, end))
-            if events:
-                return sorted(events, key=lambda x: x.start)
-        except Exception as e:
-            # Нет прямого доступа к календарю комнаты, пробуем метод 2
-            pass
-        
-        # Метод 2: Поиск встреч в основном календаре, где комната является участником
-        # Это менее надежно, но работает при ограниченных правах
-        try:
-            start = self._make_tz_aware(datetime.combine(date, time.min))
-            end = self._make_tz_aware(datetime.combine(date, time.max))
-            all_events = list(self.account.calendar.view(start, end))
+            return sorted(events, key=lambda x: x.start)
             
-            # Фильтруем встречи, где участвует комната
-            room_events = []
-            for ev in all_events:
-                is_room_participant = False
-                # Проверяем required_attendees
-                if hasattr(ev, 'required_attendees') and ev.required_attendees:
-                    for att in ev.required_attendees:
-                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
-                            if att.mailbox.email_address.lower() == room_email.lower():
-                                is_room_participant = True
-                                break
-                # Проверяем optional_attendees
-                if not is_room_participant and hasattr(ev, 'optional_attendees') and ev.optional_attendees:
-                    for att in ev.optional_attendees:
-                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
-                            if att.mailbox.email_address.lower() == room_email.lower():
-                                is_room_participant = True
-                                break
-                
-                if is_room_participant:
-                    room_events.append(ev)
-            
-            if room_events:
-                return sorted(room_events, key=lambda x: x.start)
-        except Exception as e:
-            pass
-        
-        # Если ни один метод не сработал
-        return None
+        except Exception:
+            # Если прямой доступ не сработал, возвращаем пустой список
+            return None
+
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:
         """
@@ -256,7 +218,7 @@ class CalendarAPI:
                 return False, "❌ Встреча не найдена."
             item.start = self._make_tz_aware(new_start)
             item.end = self._make_tz_aware(new_end)
-            item.save()
+            item.save(send_meeting_invitations=SEND_TO_ALL_AND_SAVE_COPY)
             return True, "✅ Встреча успешно перенесена."
         except Exception as e:
             return False, f"❌ Не удалось перенести: {e}"
