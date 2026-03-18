@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, time, date as date_cls
 from typing import Dict, List, Optional, Tuple
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, EWSTimeZone, NTLM
-from exchangelib.items import CalendarItem
+from exchangelib.items import CalendarItem, SEND_TO_ALL_AND_SAVE_COPY
 from exchangelib.properties import Attendee, Mailbox
 from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
 
@@ -230,8 +230,7 @@ class CalendarAPI:
         )
         try:
             # Отправляем приглашения всем участникам (включая комнату)
-            # Допустимые значения: 'SendToNone', 'SendToAll', 'SendToChangedAndSaveCopy', 'SendToChangedOnly'
-            event.save(send_meeting_invitations='SendToAll')
+            event.save(send_meeting_invitations=SEND_TO_ALL_AND_SAVE_COPY)
             return True, "✅ Встреча успешно создана! Приглашения отправлены.", event.id
         except Exception as e:
             error_msg = str(e)
