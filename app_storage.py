@@ -17,8 +17,8 @@ class RegisteredUser:
 
 
 def _get_db_path() -> str:
-    # Bothost обычно сохраняет файлы в папке проекта, SQLite подходит.
-    return os.path.join(os.path.dirname(__file__), "app.db")
+    data_dir = os.environ.get("DATA_DIR", "/app/data")
+    return os.path.join(data_dir, "app.db")
 
 
 def _get_fernet() -> Fernet:
