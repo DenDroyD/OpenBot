@@ -62,31 +62,38 @@ class CalendarAPI:
     def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
         """
         Получает события из календаря переговорной комнаты.
-        Использует прямой доступ к календарю комнаты с правами делегата.
+        Использует альтернативный метод: поиск в ВАШЕМ календаре встреч, где участвует комната.
+        Это показывает только те встречи, где вы участник или комната отображается в вашем календаре.
         """
         if room_name not in self.cfg.rooms:
             return None
         room_email = self.cfg.rooms[room_name]
 
         try:
-            # Создаем аккаунт для доступа к календарю комнаты
-            # Используем те же креды и конфиг, что и для основного пользователя
-            # access_type=DELEGATE позволяет видеть все встречи, если у пользователя есть права
-            room_account = Account(
-                primary_smtp_address=room_email,
-                config=self.account.config,
-                autodiscover=False,
-                access_type=DELEGATE,
-            )
-            
+            # Получаем ВСЕ встречи из ВАШЕГО календаря за день
             start = self._make_tz_aware(datetime.combine(date, time.min))
             end = self._make_tz_aware(datetime.combine(date, time.max))
-            
-            events = list(room_account.calendar.view(start, end))
-            return sorted(events, key=lambda x: x.start)
-            
+            all_events = list(self.account.calendar.view(start, end))
+
+            # Фильтруем только те, где участвует комната
+            room_events = []
+            for ev in all_events:
+                # Проверяем location
+                if ev.location and room_email.lower() in ev.location.lower():
+                    room_events.append(ev)
+                    continue
+                
+                # Проверяем attendees
+                for attendees_list in [getattr(ev, 'required_attendees', []) or [], 
+                                       getattr(ev, 'optional_attendees', []) or []]:
+                    for att in attendees_list:
+                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
+                            if att.mailbox.email_address.lower() == room_email.lower():
+                                room_events.append(ev)
+                                break
+
+            return sorted(room_events, key=lambda x: x.start) if room_events else []
         except Exception:
-            # Если прямой доступ не сработал, возвращаем пустой список
             return None
 
 
