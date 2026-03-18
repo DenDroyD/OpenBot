@@ -114,6 +114,8 @@ class CalendarAPI:
         room_name: Optional[str] = None,
         location_text: Optional[str] = None,
     ) -> Tuple[bool, str, Optional[str]]:
+        from exchangelib.items import CalendarItem as EwsCalendarItem
+        
         attendees: List[Attendee] = []
         for email in (attendees_emails or []):
             attendees.append(Attendee(mailbox=Mailbox(email_address=email)))
@@ -121,6 +123,7 @@ class CalendarAPI:
         location = location_text
         if room_name and room_name in self.cfg.rooms:
             room_email = self.cfg.rooms[room_name]
+            # Добавляем комнату как обязательного участника для бронирования
             attendees.append(Attendee(mailbox=Mailbox(email_address=room_email)))
             if not location:
                 location = f"Переговорка {room_name}"
@@ -135,10 +138,15 @@ class CalendarAPI:
             location=location,
         )
         try:
-            event.save()
-            return True, "✅ Встреча успешно создана!", event.id
+            # Отправляем приглашения всем участникам (включая комнату)
+            event.save(send_meeting_invitations=EwsCalendarItem.SEND_TO_ALL_AND_SAVE_COPY)
+            return True, "✅ Встреча успешно создана! Приглашения отправлены.", event.id
         except Exception as e:
-            return False, f"❌ Ошибка создания: {e}", None
+            error_msg = str(e)
+            # Проверяем на конфликт времени
+            if "Conflict" in error_msg or "conflict" in error_msg or "occupied" in error_msg.lower():
+                return False, f"❌ Конфликт времени: комната или участник уже заняты в это время.", None
+            return False, f"❌ Ошибка создания: {error_msg}", None
 
     def cancel_event(self, event_id: str) -> bool:
         try:
