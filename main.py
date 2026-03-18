@@ -489,7 +489,7 @@ async def main() -> None:
         builder.adjust(2)
         await message.answer("Выбери переговорку:", reply_markup=builder.as_markup())
 
-    @dp.callback_query(F.data.startswith("info_"))
+        @dp.callback_query(F.data.startswith("info_"))
     async def room_info(callback: types.CallbackQuery, state: FSMContext):
         # Проверяем регистрацию по ID пользователя, а не по сообщению
         if not is_registered(callback.from_user.id):
@@ -504,6 +504,145 @@ async def main() -> None:
             await state.set_state(RegisterStates.waiting_for_contact)
             await callback.answer()
             return
+
+        room = "Москва" if callback.data == "info_msk" else "СПб"
+        await state.update_data(current_room=room)  # запоминаем выбранную комнату
+
+        # Создаём reply-клавиатуру как в расписании
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="Сегодня"))
+        builder.add(KeyboardButton(text="Выбрать день"))
+        builder.add(KeyboardButton(text="Назад"))
+        builder.adjust(3)
+
+        await callback.message.answer(
+            f"🏢 **{room}**\n\nВыберите действие:",
+            reply_markup=builder.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+
+            @dp.message(F.text == "Сегодня")
+    async def room_today(message: types.Message, state: FSMContext):
+        # Проверяем, что мы в контексте переговорок (есть current_room)
+        data = await state.get_data()
+        room = data.get("current_room")
+        if not room:
+            # Если не в контексте, игнорируем или перенаправляем в общее меню
+            await message.answer("Сначала выберите переговорку через меню.")
+            return
+
+        if not await _ensure_registered(message, state):
+            return
+
+        api = _get_user_calendar_api(message.from_user.id)
+        current_dt = get_current_datetime_msk()
+        today = current_dt.date()
+
+        if room == "Москва":
+            events = api.get_room_events(room, today)
+            if events:
+                # Фильтруем только будущие события
+                future_events = [ev for ev in events if ev.end > current_dt]
+                text = f"🏢 **Москва** – сегодня, {today.strftime('%d.%m.%Y')} (предстоящие)\n\n"
+                if future_events:
+                    text += "\n".join([format_room_event(e) for e in future_events])
+                else:
+                    text += "📭 На сегодня предстоящих бронирований нет."
+            else:
+                text = f"🏢 **Москва** – сегодня, {today.strftime('%d.%m.%Y')}\n\n✅ Свободна."
+        else:  # СПб
+            text = "🏢 **СПб**\n\n⚠️ Для этой комнаты нет автоматической проверки занятости."
+
+        await message.answer(text, parse_mode="Markdown")
+        # Возвращаем то же меню с кнопками
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="Сегодня"))
+        builder.add(KeyboardButton(text="Выбрать день"))
+        builder.add(KeyboardButton(text="Назад"))
+        builder.adjust(3)
+        await message.answer("Выберите действие:", reply_markup=builder.as_markup(resize_keyboard=True))
+
+
+    @dp.message(F.text == "Выбрать день")
+    async def room_choose_day(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        if not data.get("current_room"):
+            await message.answer("Сначала выберите переговорку через меню.")
+            return
+
+        if not await _ensure_registered(message, state):
+            return
+
+        await state.set_state(RoomScheduleStates.waiting_for_date)
+        await message.answer("Напишите интересующий день (например: завтра, 15 марта, следующий четверг).")
+
+
+    @dp.message(RoomScheduleStates.waiting_for_date)
+    async def room_show_date(message: types.Message, state: FSMContext):
+        if not await _ensure_registered(message, state):
+            return
+
+        data = await state.get_data()
+        room = data.get("current_room")
+        if not room:
+            await state.clear()
+            await message.answer("Что-то пошло не так. Начните заново.", reply_markup=main_menu())
+            return
+
+        d = parse_natural_date((message.text or "").strip().lower())
+        if not d:
+            await message.answer("Не удалось распознать дату. Попробуйте ещё раз или нажмите «Назад».")
+            return
+
+        api = _get_user_calendar_api(message.from_user.id)
+        events = api.get_room_events(room, d)
+
+        if room == "Москва":
+            if events:
+                text = f"🏢 **Москва** – {d.strftime('%d.%m.%Y')}\n\n"
+                text += "\n".join([format_room_event(e) for e in events])
+            else:
+                text = f"🏢 **Москва** – {d.strftime('%d.%m.%Y')}\n\n✅ Свободна."
+        else:
+            text = f"🏢 **СПб** – {d.strftime('%d.%m.%Y')}\n\n⚠️ Для этой комнаты нет автоматической проверки занятости."
+
+        await message.answer(text, parse_mode="Markdown")
+        # Возвращаем меню действий
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="Сегодня"))
+        builder.add(KeyboardButton(text="Выбрать день"))
+        builder.add(KeyboardButton(text="Назад"))
+        builder.adjust(3)
+        await message.answer("Выберите действие:", reply_markup=builder.as_markup(resize_keyboard=True))
+
+        @dp.message(F.text == "Назад", RoomScheduleStates.waiting_for_date)
+    async def back_from_room_date(message: types.Message, state: FSMContext):
+        # Сбрасываем состояние даты, но оставляем выбранную комнату
+        await state.set_state(None)  # сбрасываем только состояние, данные комнаты сохранятся
+        # Возвращаем меню действий для выбранной комнаты
+        data = await state.get_data()
+        room = data.get("current_room", "Москва")  # на всякий случай
+        builder = ReplyKeyboardBuilder()
+        builder.add(KeyboardButton(text="Сегодня"))
+        builder.add(KeyboardButton(text="Выбрать день"))
+        builder.add(KeyboardButton(text="Назад"))
+        builder.adjust(3)
+        await message.answer(
+            f"🏢 **{room}**\n\nВыберите действие:",
+            reply_markup=builder.as_markup(resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+
+    @dp.message(F.text == "Назад")
+    async def room_back(message: types.Message, state: FSMContext):
+        # Сбрасываем состояние и возвращаемся к выбору комнаты
+        await state.clear()
+        builder = InlineKeyboardBuilder()
+        builder.button(text="Москва", callback_data="info_msk")
+        builder.button(text="СПб", callback_data="info_spb")
+        builder.adjust(2)
+        await message.answer("Выберите переговорку:", reply_markup=builder.as_markup())
 
         # Основной код
         api = _get_user_calendar_api(callback.from_user.id)
