@@ -82,12 +82,49 @@ def find_employee_by_fio(
     *,
     score_cutoff: int = 80,
 ) -> Optional[Tuple[Employee, int]]:
+    """
+    Умный поиск сотрудника по ФИО.
+    1. Сначала пробуем точное совпадение
+    2. Если введено 2+ слова - ищем по фамилии (первое слово) + имя
+    3. Используем fuzzy search с приоритетом на совпадение фамилии
+    """
     q = (fio_query or "").strip().lower()
     if not q:
         return None
+    
+    # Точное совпадение
     if q in fio_index:
         return fio_index[q], 100
+    
     choices = list(fio_index.keys())
+    
+    # Если введено несколько слов, пробуем найти по комбинации
+    parts = q.split()
+    if len(parts) >= 2:
+        # Ищем по фамилии + имени (первые два слова)
+        short_query = f"{parts[0]} {parts[1]}"
+        if short_query in fio_index:
+            return fio_index[short_query], 100
+        
+        # Ищем по фамилии (первое слово) - наиболее важный критерий
+        surname = parts[0]
+        surname_matches = [c for c in choices if c.startswith(surname)]
+        
+        if surname_matches:
+            # Среди совпадений по фамилии ищем лучшее по полному запросу
+            best_match = process.extractOne(q, surname_matches, scorer=fuzz.WRatio, score_cutoff=score_cutoff)
+            if best_match:
+                key, score, _ = best_match
+                return fio_index[key], int(score)
+            
+            # Если не нашли по полному запросу, берем первое совпадение по фамилии
+            # Но только если фамилия совпадает точно или очень близко
+            for candidate in surname_matches:
+                cand_parts = candidate.split()
+                if len(cand_parts) > 0 and cand_parts[0] == surname:
+                    return fio_index[candidate], 95  # Высокий скор за точное совпадение фамилии
+    
+    # Стандартный fuzzy поиск по всем ФИО
     match = process.extractOne(q, choices, scorer=fuzz.WRatio, score_cutoff=score_cutoff)
     if not match:
         return None
