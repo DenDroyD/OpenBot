@@ -748,34 +748,31 @@ async def main() -> None:
         current_dt = get_current_datetime_msk()
         today = current_dt.date()
 
-        # Сначала пробуем получить детальные события через прямой доступ
         events = api.get_room_events(room, today)
         
         # Формируем текст ответа
         text = f"🏢 **{room}** – сегодня, {today.strftime('%d.%m.%Y')} (предстоящие)\n\n"
         
-        # Если получили события (список не пустой), показываем их
-        if events and len(events) > 0:
+        if events is not None:
+            # Есть доступ к календарю комнаты, показываем события
             future_events = [ev for ev in events if ev.end > current_dt]
             if future_events:
                 text += "\n".join([format_room_event(e) for e in future_events])
             else:
                 text += "📭 На сегодня предстоящих бронирований нет."
         else:
-            # Если событий нет или доступ не получен, используем Free/Busy для проверки занятости
-            busy_slots = api.get_room_free_busy_slots(room, today)
+            # Нет доступа к календарю, проверяем занятость через GetFreeBusyInfo
+            # Проверяем весь день с 00:00 до 23:59
+            day_start = current_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = current_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
             
-            # Фильтруем только будущие слоты
-            future_slots = [s for s in busy_slots if s['end'] > current_dt]
-            
-            if future_slots:
-                text += "⛔ Занята:\n"
-                for slot in future_slots:
-                    start_str = slot['start'].strftime("%H:%M")
-                    end_str = slot['end'].strftime("%H:%M")
-                    text += f"• {start_str}-{end_str} | Занято\n"
-            else:
+            available, msg = api.is_room_available(room, day_start, day_end)
+            if available:
                 text += "✅ Свободна на весь день."
+            else:
+                # msg содержит информацию о занятости
+                text += f"⚠️ {msg}"
+                text += "\n\n(Подробное расписание недоступно из-за ограничений доступа)"
 
         # Возвращаем меню расписания
         builder = InlineKeyboardBuilder()
@@ -817,8 +814,6 @@ async def main() -> None:
 
     @dp.message(RoomScheduleStates.waiting_for_date)
     async def room_show_date_message(message: types.Message, state: FSMContext):
-        from datetime import time as time_cls
-        
         if not is_registered(message.from_user.id):
             await message.answer(
                 "🔐 Для работы нужно зарегистрироваться.",
@@ -841,21 +836,30 @@ async def main() -> None:
             return
 
         api = _get_user_calendar_api(message.from_user.id)
-        
-        # Используем НОВЫЙ метод get_room_free_busy_slots для получения всех занятых слотов
-        busy_slots = api.get_room_free_busy_slots(room, d)
+        events = api.get_room_events(room, d)
 
         # Формируем текст ответа
-        text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')} (09:00-18:00)\n\n"
+        text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')}\n\n"
         
-        if busy_slots:
-            text += "⛔ Занята:\n"
-            for slot in busy_slots:
-                start_str = slot['start'].strftime("%H:%M")
-                end_str = slot['end'].strftime("%H:%M")
-                text += f"• {start_str}-{end_str} | Занято\n"
+        if events is not None:
+            # Есть доступ к календарю комнаты
+            if events:
+                text += "\n".join([format_room_event(e) for e in events])
+            else:
+                text += "📭 На этот день бронирований нет."
         else:
-            text += "✅ Свободна весь день (09:00-18:00)."
+            # Нет доступа к календарю, проверяем через GetFreeBusyInfo
+            day_start = datetime.combine(d, time.min)
+            day_end = datetime.combine(d, time.max)
+            day_start = api._make_tz_aware(day_start)
+            day_end = api._make_tz_aware(day_end)
+            
+            available, msg = api.is_room_available(room, day_start, day_end)
+            if available:
+                text += "✅ Свободна на весь день."
+            else:
+                text += f"⚠️ {msg}"
+                text += "\n\n(Подробное расписание недоступно из-за ограничений доступа)"
 
         await state.clear()
         await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())

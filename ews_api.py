@@ -59,69 +59,42 @@ class CalendarAPI:
         events = list(self.account.calendar.view(start, end))
         return sorted(events, key=lambda x: x.start)
 
-    def get_room_free_busy_slots(self, room_name: str, date: date_cls) -> List[dict]:
-        """
-        Получает занятые слоты комнаты через Free/Busy информацию (GetUserAvailability).
-        Возвращает список словарей {'start': datetime, 'end': datetime}.
-        Показывает ВСЕ занятые промежутки (даже чужие встречи), но без имен и тем.
-        Работает в интервале 09:00 - 18:00 по московскому времени.
-        """
-        if room_name not in self.cfg.rooms:
-            return []
-        
-        room_email = self.cfg.rooms[room_name]
-        # Ограничиваем запрос рабочим днем 09:00 - 18:00
-        start_dt = self._make_tz_aware(datetime.combine(date, time(9, 0)))
-        end_dt = self._make_tz_aware(datetime.combine(date, time(18, 0)))
-
-        try:
-            free_busy_info = self.account.protocol.get_free_busy_info(
-                attendees=[room_email],
-                start=start_dt,
-                end=end_dt,
-            )
-
-            busy_slots = []
-            for info in free_busy_info:
-                if hasattr(info, 'busy_periods'):
-                    for period in info.busy_periods:
-                        busy_slots.append({
-                            'start': period.start,
-                            'end': period.end
-                        })
-            
-            return sorted(busy_slots, key=lambda x: x['start'])
-
-        except Exception:
-            return []
-
     def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
         """
-        Получает события из календаря комнаты.
-        Основной метод: Прямое подключение к ящику комнаты с правами DELEGATE.
-        Это позволяет видеть ВСЕ встречи в комнате (тему, организатора, время),
-        если у вашего аккаунта есть права на чтение календаря комнаты (как в Outlook).
+        Получает события из календаря переговорной комнаты.
+        Использует альтернативный метод: поиск в ВАШЕМ календаре встреч, где участвует комната.
+        Это показывает только те встречи, где вы участник или комната отображается в вашем календаре.
         """
         if room_name not in self.cfg.rooms:
             return None
         room_email = self.cfg.rooms[room_name]
 
-        # Попытка прямого доступа к календарю комнаты
         try:
-            room_account = Account(
-                primary_smtp_address=room_email,
-                config=self.account.config,
-                autodiscover=False,
-                access_type=DELEGATE,
-            )
+            # Получаем ВСЕ встречи из ВАШЕГО календаря за день
             start = self._make_tz_aware(datetime.combine(date, time.min))
             end = self._make_tz_aware(datetime.combine(date, time.max))
-            events = list(room_account.calendar.view(start, end))
-            # Если получили список (даже пустой), возвращаем его
-            return sorted(events, key=lambda x: x.start)
-        except Exception as e:
-            # Если прямой доступ не сработал, возвращаем пустой список
-            return [] 
+            all_events = list(self.account.calendar.view(start, end))
+
+            # Фильтруем только те, где участвует комната
+            room_events = []
+            for ev in all_events:
+                # Проверяем location
+                if ev.location and room_email.lower() in ev.location.lower():
+                    room_events.append(ev)
+                    continue
+                
+                # Проверяем attendees
+                for attendees_list in [getattr(ev, 'required_attendees', []) or [], 
+                                       getattr(ev, 'optional_attendees', []) or []]:
+                    for att in attendees_list:
+                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
+                            if att.mailbox.email_address.lower() == room_email.lower():
+                                room_events.append(ev)
+                                break
+
+            return sorted(room_events, key=lambda x: x.start) if room_events else []
+        except Exception:
+            return None
 
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:
