@@ -478,7 +478,18 @@ async def main() -> None:
         builder.adjust(2)
         await message.answer("Выбери переговорку:", reply_markup=builder.as_markup())
 
-        @dp.callback_query(F.data.startswith("info_"))
+           # ===== Переговорки =====
+    @dp.message(F.text == "🏢 Переговорки")
+    async def rooms_menu(message: types.Message, state: FSMContext):
+        if not await _ensure_registered(message, state):
+            return
+        builder = InlineKeyboardBuilder()
+        builder.button(text="Москва", callback_data="info_msk")
+        builder.button(text="СПб", callback_data="info_spb")
+        builder.adjust(2)
+        await message.answer("Выбери переговорку:", reply_markup=builder.as_markup())
+
+    @dp.callback_query(F.data.startswith("info_"))
     async def room_info(callback: types.CallbackQuery, state: FSMContext):
         # Проверяем регистрацию по ID пользователя, а не по сообщению
         if not is_registered(callback.from_user.id):
