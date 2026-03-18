@@ -414,16 +414,24 @@ async def main() -> None:
         
         # Если это бронирование из меню переговорок - сразу переходим к подтверждению
         if data.get("book_room"):
-            # Участники не требуются для простого бронирования
-            await state.update_data(attendees=[])
             # Комната уже установлена в book_room
             room = data.get("book_room")
-            await state.update_data(room=room)
             
-            # Формируем текст подтверждения
+            # Проверяем доступность комнаты
             start_dt = tz.localize(datetime.combine(data["date"], data["time"]))
             end_dt = start_dt + timedelta(minutes=int(duration))
             
+            api = _get_user_calendar_api(message.from_user.id)
+            available, msg = api.is_room_available(room, start_dt, end_dt)
+            if not available:
+                await message.answer(f"⚠️ {msg}\nПопробуйте другое время или создайте без комнаты.")
+                await state.clear()
+                return
+            
+            # Участники не требуются для простого бронирования (пока пустой список)
+            await state.update_data(attendees=[], room=room)
+            
+            # Формируем текст подтверждения
             text = (
                 f"📌 **Тема:** {data['subject']}\n"
                 f"📅 **Дата:** {start_dt.strftime('%d.%m.%Y')}\n"
@@ -448,6 +456,37 @@ async def main() -> None:
 
     @dp.message(CreateMeeting.attendees)
     async def create_attendees(message: types.Message, state: FSMContext):
+        data = await state.get_data()
+        
+        # Если это бронирование переговорки - после ввода участников сразу показываем подтверждение
+        if data.get("book_room"):
+            emails, warnings = _resolve_attendees_to_emails(message.text or "")
+            await state.update_data(attendees=emails)
+            
+            room = data.get("book_room")
+            start_dt = tz.localize(datetime.combine(data["date"], data["time"]))
+            end_dt = start_dt + timedelta(minutes=int(data["duration"]))
+            
+            text = (
+                f"📌 **Тема:** {data['subject']}\n"
+                f"📅 **Дата:** {start_dt.strftime('%d.%m.%Y')}\n"
+                f"⏰ **Время:** {start_dt.strftime('%H:%M')} — {end_dt.strftime('%H:%M')}\n"
+                f"🏢 **Комната:** {room}\n"
+            )
+            if emails:
+                text += f"👥 **Участники:** {', '.join(emails)}\n"
+            text += "\nПодтвердить создание?"
+            
+            kb = InlineKeyboardBuilder()
+            kb.button(text="✅ Да", callback_data="confirm_yes")
+            kb.button(text="❌ Нет", callback_data="confirm_no")
+            kb.adjust(2)
+            
+            await state.set_state(CreateMeeting.confirm)
+            await message.answer(text, reply_markup=kb.as_markup(), parse_mode="Markdown")
+            return
+        
+        # Обычный поток создания встречи
         emails, warnings = _resolve_attendees_to_emails(message.text or "")
         await state.update_data(attendees=emails)
 
@@ -539,6 +578,13 @@ async def main() -> None:
         await callback.message.edit_text("Введите участников через запятую (ФИО) или '-' если никого не добавлять:")
         await callback.answer()
 
+    @dp.callback_query(F.data == "add_attendees_to_booking")
+    async def add_attendees_to_booking_handler(callback: types.CallbackQuery, state: FSMContext):
+        """Обработчик кнопки 'Добавить участников' при бронировании переговорки"""
+        await state.set_state(CreateMeeting.attendees)
+        await callback.message.edit_text("Введите участников через запятую (ФИО) или '-' если никого не добавлять:")
+        await callback.answer()
+
     # ===== Переговорки =====
     @dp.message(F.text == "🏢 Переговорки")
     async def rooms_menu(message: types.Message, state: FSMContext):
@@ -604,6 +650,9 @@ async def main() -> None:
         builder.add(KeyboardButton(text="Назад"))
         builder.adjust(3)
 
+        # Устанавливаем состояние для обработки следующих сообщений
+        await state.set_state(RoomScheduleStates.waiting_for_date)
+        
         await callback.message.edit_text(
             f"🏢 **{room}** — Расписание\n\nВыберите действие:",
             reply_markup=builder.as_markup(resize_keyboard=True),
@@ -661,10 +710,10 @@ async def main() -> None:
         if not await _ensure_registered(message, state):
             return
 
-        await state.set_state(RoomScheduleStates.waiting_for_date)
+        # Состояние уже установлено, просто просим ввести дату
         await message.answer("Напишите интересующий день (например: завтра, 15 марта, следующий четверг).")
 
-    @dp.message(RoomScheduleStates.waiting_for_date, F.text != "Назад")
+    @dp.message(RoomScheduleStates.waiting_for_date)
     async def room_show_date(message: types.Message, state: FSMContext):
         if not await _ensure_registered(message, state):
             return
@@ -675,6 +724,16 @@ async def main() -> None:
             await state.clear()
             await message.answer("Что-то пошло не так. Начните заново.", reply_markup=main_menu())
             return
+
+        # Обработка кнопки "Назад"
+        if message.text == "Назад":
+            await state.clear()
+            await message.answer("Главное меню:", reply_markup=main_menu())
+            return
+        
+        # Обработка ввода даты (если это не "Сегодня" и не "Выбрать день", которые обрабатываются отдельно)
+        if message.text in ["Сегодня", "Выбрать день"]:
+            return  # Эти кнопки обрабатываются другими хендлерами
 
         d = parse_natural_date((message.text or "").strip().lower())
         if not d:

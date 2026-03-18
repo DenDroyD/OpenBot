@@ -78,18 +78,31 @@ class CalendarAPI:
             return None
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:
-        if room_name == "Москва":
-            events = self.get_room_events(room_name, start.date())
-            if events is None:
-                return False, "Не удалось проверить занятость (нет доступа к календарю)."
-            for ev in events:
-                if not (ev.end <= start or ev.start >= end):
-                    return (
-                        False,
-                        f"Комната занята: {ev.start.strftime('%H:%M')}-{ev.end.strftime('%H:%M')} — {ev.subject}",
-                    )
-            return True, "Слот свободен."
-        return True, "⚠️ Для СПб нет точной проверки занятости. Проверьте в Outlook вручную."
+        if room_name not in self.cfg.rooms:
+            return False, f"⚠️ Комната '{room_name}' не найдена в конфигурации."
+        
+        events = self.get_room_events(room_name, start.date())
+        if events is None:
+            return False, "Не удалось проверить занятость (нет доступа к календарю)."
+        
+        for ev in events:
+            if not (ev.end <= start or ev.start >= end):
+                organizer = getattr(ev, 'organizer', None)
+                organizer_text = ""
+                if organizer and hasattr(organizer, 'name') and organizer.name:
+                    organizer_text = f" — {organizer.name}"
+                elif hasattr(ev, 'required_attendees') and ev.required_attendees:
+                    # Пытаемся получить первого участника как организатора
+                    for att in ev.required_attendees[:1]:
+                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'name') and att.mailbox.name:
+                            organizer_text = f" — {att.mailbox.name}"
+                            break
+                
+                return (
+                    False,
+                    f"Комната занята: {ev.start.strftime('%H:%M')}-{ev.end.strftime('%H:%M')}{organizer_text} ({ev.subject or 'Без темы'})",
+                )
+        return True, "Слот свободен."
 
     def create_event(
         self,
