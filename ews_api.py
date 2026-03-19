@@ -515,14 +515,34 @@ class CalendarAPI:
             return False, f"❌ Ошибка создания: {error_msg}", None
 
     def cancel_event(self, event_id: str) -> bool:
+        """
+        Отменяет встречу и отправляет уведомления всем участникам.
+        
+        Args:
+            event_id: ID встречи в Exchange
+            
+        Returns:
+            True если успешно, False иначе
+        """
         try:
+            logging.info(f"[Cancel] Попытка удаления встречи {event_id}...")
             item = self.account.calendar.get(id=event_id)
+            
             if item:
-                # Удаляем встречу БЕЗ отправки уведомлений участникам
-                item.delete(send_cancellation_to_clients=SEND_TO_NONE)
+                logging.info(f"[Cancel] Встреча найдена: {item.subject}. Отправка уведомлений...")
+                # Отправляем уведомления об отмене всем участникам и сохраняем копию у организатора
+                # Используем правильный параметр send_meeting_cancellations
+                item.delete(send_meeting_cancellations=SEND_TO_ALL_AND_SAVE_COPY)
+                logging.info(f"[Cancel] Встреча {event_id} успешно удалена, уведомления отправлены.")
                 return True
-            return False
-        except Exception:
+            else:
+                logging.warning(f"[Cancel] Встреча {event_id} не найдена.")
+                return False
+                
+        except Exception as e:
+            logging.error(f"[Cancel] Критическая ошибка при удалении встречи {event_id}: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return False
 
     def reschedule_event(self, event_id: str, new_start: datetime, new_end: datetime) -> Tuple[bool, str]:

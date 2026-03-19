@@ -239,6 +239,17 @@ async def main() -> None:
         await state.clear()
         await message.answer("Ок. Главное меню:", reply_markup=main_menu())
 
+    # ===== Универсальный сброс состояния при нажатии кнопок главного меню (высокий приоритет) =====
+    @dp.message(
+        F.text.in_(["📅 Расписание", "➕ Создать встречу", "🏢 Переговорки", "🗑 Удалить/перенести", "❓ Помощь"])
+    )
+    async def reset_state_on_main_menu(message: types.Message, state: FSMContext):
+        """Сбрасывает текущее состояние при нажатии любой кнопки главного меню"""
+        await state.clear()
+        # Не завершаем обработку, чтобы сообщение было обработано соответствующим хендлером по F.text
+        # В aiogram 3.x хендлеры срабатывают по порядку регистрации, поэтому этот хендлер
+        # должен быть зарегистрирован ДО конкретных хендлеров для этих же кнопок
+
     # ===== Регистрация =====
     @dp.message(RegisterStates.waiting_for_contact)
     async def reg_contact(message: types.Message, state: FSMContext):
@@ -381,17 +392,17 @@ async def main() -> None:
         if data.get("book_room"):
             d = parse_natural_date((message.text or "").strip().lower())
             if not d:
-                await message.answer("Не могу распознать дату. Попробуйте ещё раз (например: завтра, 15 марта).")
+                await message.answer("Не могу распознать дату. Попробуйте ещё раз (например: завтра, 15 марта).", reply_markup=main_menu())
                 return
             await state.update_data(date=d)
             await state.set_state(CreateMeeting.time)
-            await message.answer("Во сколько начало? (например: 14:00, формат ЧЧ:ММ)")
+            await message.answer("Во сколько начало? (например: 14:00, формат ЧЧ:ММ)", reply_markup=main_menu())
             return
         
         # Обычный поток создания встречи
         await state.update_data(subject=(message.text or "").strip())
         await state.set_state(CreateMeeting.date)
-        await message.answer("Когда встреча? (например: завтра, 15 марта)")
+        await message.answer("Когда встреча? (например: завтра, 15 марта)", reply_markup=main_menu())
 
     @dp.message(CreateMeeting.date)
     async def create_date(message: types.Message, state: FSMContext):
@@ -400,31 +411,31 @@ async def main() -> None:
         if data.get("book_room"):
             d = parse_natural_date((message.text or "").strip().lower())
             if not d:
-                await message.answer("Не могу распознать дату. Попробуйте ещё раз (например: завтра, 15 марта).")
+                await message.answer("Не могу распознать дату. Попробуйте ещё раз (например: завтра, 15 марта).", reply_markup=main_menu())
                 return
             await state.update_data(date=d)
             await state.set_state(CreateMeeting.time)
-            await message.answer("Во сколько начало? (например: 14:00, формат ЧЧ:ММ)")
+            await message.answer("Во сколько начало? (например: 14:00, формат ЧЧ:ММ)", reply_markup=main_menu())
             return
             
         d = parse_natural_date(message.text or "")
         if not d:
-            await message.answer("Не могу распознать дату. Попробуйте ещё раз.")
+            await message.answer("Не могу распознать дату. Попробуйте ещё раз.", reply_markup=main_menu())
             return
         await state.update_data(date=d)
         await state.set_state(CreateMeeting.time)
-        await message.answer("Во сколько начало? (например: 14:00, формат ЧЧ:ММ)")
+        await message.answer("Во сколько начало? (например: 14:00, формат ЧЧ:ММ)", reply_markup=main_menu())
 
     @dp.message(CreateMeeting.time)
     async def create_time(message: types.Message, state: FSMContext):
         try:
             t = datetime.strptime((message.text or "").strip(), "%H:%M").time()
         except Exception:
-            await message.answer("Неверный формат времени. Используйте ЧЧ:ММ, например 14:30.")
+            await message.answer("Неверный формат времени. Используйте ЧЧ:ММ, например 14:30.", reply_markup=main_menu())
             return
         await state.update_data(time=t)
         await state.set_state(CreateMeeting.duration)
-        await message.answer("Длительность в минутах? (по умолчанию 60)")
+        await message.answer("Длительность в минутах? (по умолчанию 60)", reply_markup=main_menu())
 
     @dp.message(CreateMeeting.duration)
     async def create_duration(message: types.Message, state: FSMContext):
@@ -476,7 +487,7 @@ async def main() -> None:
         
         # Обычный поток создания встречи
         await state.set_state(CreateMeeting.attendees)
-        await message.answer("Укажите участников через запятую (ФИО) или '-' если никого не добавлять.")
+        await message.answer("Укажите участников через запятую (ФИО) или '-' если никого не добавлять.", reply_markup=main_menu())
 
     @dp.message(CreateMeeting.attendees)
     async def create_attendees(message: types.Message, state: FSMContext):
@@ -522,7 +533,7 @@ async def main() -> None:
 
         note = "\n".join(warnings)
         if note:
-            await message.answer(note)
+            await message.answer(note, reply_markup=main_menu())
 
         await state.set_state(CreateMeeting.room)
         await message.answer("Нужна переговорка?", reply_markup=builder.as_markup())
