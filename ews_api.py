@@ -165,11 +165,11 @@ class CalendarAPI:
         Возвращает список кортежей (start, end) занятых периодов в московском времени.
         """
         if room_name not in self.cfg.rooms:
+            logging.warning(f"[FreeBusy] Комната '{room_name}' не найдена в конфигурации")
             return []
         
         room_email = self.cfg.rooms[room_name]
-        # Используем правильный метод для получения часового пояса в новых версиях exchangelib
-        tz = EWSTimeZone('Europe/Moscow')
+        logging.info(f"[FreeBusy] Запрос для комнаты: {room_name} ({room_email}), дата: {date}")
         
         # Формируем начало и конец дня в нужном часовом поясе
         start_dt = datetime.combine(date, time.min)
@@ -178,33 +178,58 @@ class CalendarAPI:
         start = self._make_tz_aware(start_dt)
         end = self._make_tz_aware(end_dt)
         
+        logging.info(f"[FreeBusy] Интервал запроса: {start} - {end}")
+        
         try:
+            # Создаем временный аккаунт для комнаты (не нужен полный доступ, только email)
+            from exchangelib import Account
+            logging.info(f"[FreeBusy] Создание Account для {room_email}...")
+            room_account = Account(
+                primary_smtp_address=room_email,
+                config=self.account.config,
+                autodiscover=False,
+                access_type=DELEGATE,
+            )
+            logging.info(f"[FreeBusy] Account создан успешно")
+            
             # Запрос Free/Busy информации
-            # Возвращает список объектов FreeBusyView (по одному на каждый email в запросе)
+            # В новых версиях exchangelib используется параметр 'accounts' (список аккаунтов)
+            logging.info(f"[FreeBusy] Вызов get_free_busy_info(accounts=[...], start={start}, end={end})...")
             fb_views = self.account.protocol.get_free_busy_info(
-                attendees=[room_email],
+                accounts=[room_account],
                 start=start,
                 end=end,
             )
             
+            logging.info(f"[FreeBusy] Получено {len(fb_views) if fb_views else 0} ответов")
+            
             if not fb_views or len(fb_views) == 0:
-                logging.warning(f"FreeBusy: пустой ответ для {room_email}")
+                logging.warning(f"[FreeBusy] Пустой ответ для {room_email}")
                 return []
             
             fb_view = fb_views[0]
             busy_periods = []
             
+            logging.info(f"[FreeBusy] Обработка busy_periods...")
+            
             # Извлекаем периоды занятости
             if hasattr(fb_view, 'busy_periods') and fb_view.busy_periods:
-                for period in fb_view.busy_periods:
+                logging.info(f"[FreeBusy] Найдено {len(fb_view.busy_periods)} периодов в ответе")
+                for idx, period in enumerate(fb_view.busy_periods):
                     # Статусы: 'Free', 'Tentative', 'Busy', 'OOF'
                     # Нас интересуют все, кроме 'Free'
                     status = getattr(period, 'free_busy_status', None)
-                    if status and status != 'Free':
-                        p_start = period.start.astimezone(tz)
-                        p_end = period.end.astimezone(tz)
+                    status_value = status.value if status else 'Unknown'
+                    
+                    p_start = period.start.astimezone(self.TZ)
+                    p_end = period.end.astimezone(self.TZ)
+                    
+                    logging.info(f"[FreeBusy] Период #{idx+1}: {p_start.strftime('%H:%M')} - {p_end.strftime('%H:%M')} (статус: {status_value})")
+                    
+                    if status and status_value != 'Free':
                         busy_periods.append((p_start, p_end))
-                        logging.debug(f"  Период: {p_start.strftime('%H:%M')} - {p_end.strftime('%H:%M')} ({status})")
+            else:
+                logging.warning(f"[FreeBusy] Атрибут busy_periods отсутствует или пуст")
             
             # Сортируем по времени начала
             busy_periods.sort(key=lambda x: x[0])
@@ -212,10 +237,11 @@ class CalendarAPI:
             # Объединяем смежные и перекрывающиеся интервалы
             # Например: 11:30-12:00 и 12:00-13:00 -> 11:30-13:00
             if not busy_periods:
-                logging.info(f"FreeBusy для {room_name}: нет занятых периодов")
+                logging.info(f"[FreeBusy] для {room_name}: нет занятых периодов (все свободны)")
                 return []
                 
             merged_periods = [busy_periods[0]]
+            logging.info(f"[FreeBusy] Начало объединения: {len(busy_periods)} периодов")
             
             for current_start, current_end in busy_periods[1:]:
                 last_start, last_end = merged_periods[-1]
@@ -225,17 +251,20 @@ class CalendarAPI:
                     # Продлеваем последний период, если текущий заканчивается позже
                     new_end = max(last_end, current_end)
                     merged_periods[-1] = (last_start, new_end)
+                    logging.debug(f"[FreeBusy] Объединение: {last_start.strftime('%H:%M')}-{last_end.strftime('%H:%M')} + {current_start.strftime('%H:%M')}-{current_end.strftime('%H:%M')} -> {last_start.strftime('%H:%M')}-{new_end.strftime('%H:%M')}")
                 else:
                     # Добавляем новый отдельный период
                     merged_periods.append((current_start, current_end))
+                    logging.debug(f"[FreeBusy] Новый период: {current_start.strftime('%H:%M')}-{current_end.strftime('%H:%M')}")
             
-            logging.info(f"FreeBusy для {room_name}: найдено {len(busy_periods)} периодов, объединено в {len(merged_periods)}")
+            logging.info(f"[FreeBusy] для {room_name}: найдено {len(busy_periods)} периодов, объединено в {len(merged_periods)}")
             for i, (s, e) in enumerate(merged_periods):
-                logging.info(f"  [{i+1}] {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+                logging.info(f"[FreeBusy] Итоговый период [{i+1}]: {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+            
             return merged_periods
             
         except Exception as e:
-            logging.error(f"Ошибка GetFreeBusyInfo для {room_email}: {e}", exc_info=True)
+            logging.error(f"[FreeBusy] Критическая ошибка для {room_email}: {type(e).__name__}: {e}", exc_info=True)
             return []
 
 
@@ -254,10 +283,19 @@ class CalendarAPI:
             ews_start = self._make_tz_aware(start)
             ews_end = self._make_tz_aware(end)
             
+            # Создаем временный аккаунт для комнаты
+            from exchangelib import Account
+            room_account = Account(
+                primary_smtp_address=room_email,
+                config=self.account.config,
+                autodiscover=False,
+                access_type=DELEGATE,
+            )
+            
             # Используем протокол для получения информации о занятости
-            # Возвращает список статусов для каждого участника
+            # В новых версиях используется параметр 'accounts'
             free_busy_info = self.account.protocol.get_free_busy_info(
-                attendees=[room_email],
+                accounts=[room_account],
                 start=ews_start,
                 end=ews_end,
             )
@@ -324,9 +362,19 @@ class CalendarAPI:
             day_start = self._make_tz_aware(datetime.combine(date, time.min))
             day_end = self._make_tz_aware(datetime.combine(date, time.max))
             
+            # Создаем временный аккаунт для комнаты
+            from exchangelib import Account
+            room_account = Account(
+                primary_smtp_address=room_email,
+                config=self.account.config,
+                autodiscover=False,
+                access_type=DELEGATE,
+            )
+            
             # Получаем информацию о занятости через GetFreeBusyInfo
+            # В новых версиях используется параметр 'accounts'
             free_busy_info = self.account.protocol.get_free_busy_info(
-                attendees=[room_email],
+                accounts=[room_account],
                 start=day_start,
                 end=day_end,
             )
