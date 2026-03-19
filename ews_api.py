@@ -182,22 +182,20 @@ class CalendarAPI:
         
         try:
             # Метод 1: Вызов get_free_busy_info с правильным форматом accounts
-            # accounts должен быть списком кортежей: [(account, attendee_type, exclude_conflicts), ...]
-            # attendee_type: 'Optional', 'Optional', 'Resource', 'Required'
-            # exclude_conflicts: True/False
-            logging.info(f"[FreeBusy] Попытка 1: Вызов get_free_busy_info с accounts=[(email, 'Optional', False)]...")
+            logging.info(f"[FreeBusy] Попытка 1: Вызов get_free_busy_info с accounts=[(email, 'Resource', False)]...")
             
-            fb_views = self.account.protocol.get_free_busy_info(
-                accounts=[(room_email, 'Optional', False)],  # Передаем кортеж (email, attendee_type, exclude_conflicts)
+            # ПОЛУЧАЕМ ГЕНЕРАТОР И СРАЗУ ПРЕОБРАЗУЕМ В СПИСОК
+            fb_views_gen = self.account.protocol.get_free_busy_info(
+                accounts=[(room_email, 'Resource', False)],
                 start=day_start,
                 end=day_end,
             )
+            fb_views = list(fb_views_gen)
             
-            logging.info(f"[FreeBusy] Получено {len(fb_views) if fb_views else 0} ответов")
+            logging.info(f"[FreeBusy] Получено {len(fb_views)} ответов")
             
-            if not fb_views or len(fb_views) == 0:
+            if not fb_views:
                 logging.warning(f"[FreeBusy] Пустой ответ для {room_email}")
-                # Если нет ответа - считаем весь день свободным
                 return ([], [(day_start, day_end)])
             
             fb_view = fb_views[0]
@@ -313,11 +311,13 @@ class CalendarAPI:
             
             # Используем протокол для получения информации о занятости
             # accounts должен быть списком кортежей: [(account, attendee_type, exclude_conflicts), ...]
-            free_busy_info = self.account.protocol.get_free_busy_info(
+            free_busy_gen = self.account.protocol.get_free_busy_info(
                 accounts=[(room_email, 'Resource', False)],  # Используем 'Resource' для комнаты
                 start=ews_start,
                 end=ews_end,
             )
+            # Преобразуем генератор в список
+            free_busy_info = list(free_busy_gen)
             
             # Анализируем результат через calendar_events (как в успешном тестовом скрипте)
             for status in free_busy_info:
@@ -387,11 +387,13 @@ class CalendarAPI:
             
             # Получаем информацию о занятости через GetFreeBusyInfo
             # accounts должен быть списком кортежей: [(account, attendee_type, exclude_conflicts), ...]
-            free_busy_info = self.account.protocol.get_free_busy_info(
+            free_busy_gen = self.account.protocol.get_free_busy_info(
                 accounts=[(room_email, 'Resource', False)],  # Используем 'Resource' для комнаты
                 start=day_start,
                 end=day_end,
             )
+            # Преобразуем генератор в список
+            free_busy_info = list(free_busy_gen)
             
             busy_periods = []
             for status in free_busy_info:
