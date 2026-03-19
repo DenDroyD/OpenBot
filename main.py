@@ -685,10 +685,11 @@ async def main() -> None:
         room = "Москва" if callback.data == "info_msk" else "СПб"
         await state.update_data(current_room=room)
 
-        # Меню выбора действия: Забронировать / Узнать расписание
+        # Меню выбора действия: Забронировать / Узнать расписание / В главное меню
         builder = InlineKeyboardBuilder()
         builder.button(text="📅 Узнать расписание", callback_data="room_schedule")
         builder.button(text="➕ Забронировать", callback_data="room_book")
+        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
 
         await callback.message.edit_text(
@@ -732,7 +733,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="Сегодня", callback_data="room_today_btn")
         builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
+        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
 
         await callback.message.edit_text(
@@ -783,7 +784,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="Сегодня", callback_data="room_today_btn")
         builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
+        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
         
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
@@ -808,11 +809,11 @@ async def main() -> None:
 
         # Запрашиваем ввод даты через модальное окно или сообщение
         builder = InlineKeyboardBuilder()
-        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
+        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
         
         await callback.message.edit_text(
-            "Напишите интересующий день (например: завтра, 15 марта, следующий четверг).\n\nИли нажмите «К комнатам».",
+            "Напишите интересующий день (например: завтра, 15 марта, следующий четверг).\n\nИли нажмите «В главное меню».",
             reply_markup=builder.as_markup()
         )
         await state.set_state(RoomScheduleStates.waiting_for_date)
@@ -864,7 +865,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="Сегодня", callback_data="room_today_btn")
         builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
+        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
         
         await message.answer(text, parse_mode="Markdown", reply_markup=builder.as_markup())

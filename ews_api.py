@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, time, date as date_cls
 from typing import Dict, List, Optional, Tuple
+import logging
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, EWSTimeZone, NTLM
 from exchangelib.items import CalendarItem, SEND_TO_ALL_AND_SAVE_COPY
