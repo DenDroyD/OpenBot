@@ -239,17 +239,6 @@ async def main() -> None:
         await state.clear()
         await message.answer("Ок. Главное меню:", reply_markup=main_menu())
 
-    # ===== Универсальный сброс состояния при нажатии кнопок главного меню (высокий приоритет) =====
-    @dp.message(
-        F.text.in_(["📅 Расписание", "➕ Создать встречу", "🏢 Переговорки", "🗑 Удалить/перенести", "❓ Помощь"])
-    )
-    async def reset_state_on_main_menu(message: types.Message, state: FSMContext):
-        """Сбрасывает текущее состояние при нажатии любой кнопки главного меню"""
-        await state.clear()
-        # Не завершаем обработку, чтобы сообщение было обработано соответствующим хендлером по F.text
-        # В aiogram 3.x хендлеры срабатывают по порядку регистрации, поэтому этот хендлер
-        # должен быть зарегистрирован ДО конкретных хендлеров для этих же кнопок
-
     # ===== Регистрация =====
     @dp.message(RegisterStates.waiting_for_contact)
     async def reg_contact(message: types.Message, state: FSMContext):
@@ -324,6 +313,12 @@ async def main() -> None:
     # ===== Расписание =====
     @dp.message(F.text == "📅 Расписание")
     async def schedule_menu(message: types.Message, state: FSMContext):
+        # Проверяем, не находится ли пользователь в каком-либо процессе
+        current_state = await state.get_state()
+        if current_state is not None:
+            await message.answer("⏳ Сначала завершите текущее действие (отправьте /cancel или нажмите «Отмена»).", reply_markup=main_menu())
+            return
+        
         if not await _ensure_registered(message, state):
             return
         await state.set_state(ScheduleStates.waiting_for_date)
@@ -342,7 +337,7 @@ async def main() -> None:
             text = f"📅 **Сегодня, {today.strftime('%d.%m.%Y')}** (предстоящие)\n\n" + "\n".join([format_event(e) for e in events])
         else:
             text = "📭 На сегодня предстоящих встреч нет."
-        await message.answer(text, parse_mode="Markdown", reply_markup=schedule_submenu())
+        await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())
 
     @dp.message(ScheduleStates.waiting_for_date, F.text == "Выбрать день")
     async def ask_day(message: types.Message, state: FSMContext):
@@ -375,11 +370,17 @@ async def main() -> None:
             text = f"📅 **{date_desc}**\n\n" + "\n".join([format_event(e) for e in events])
         else:
             text = f"📭 На {date_desc} встреч нет."
-        await message.answer(text, parse_mode="Markdown", reply_markup=schedule_submenu())
+        await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())
 
     # ===== Создание встречи =====
     @dp.message(F.text == "➕ Создать встречу")
     async def create_start(message: types.Message, state: FSMContext):
+        # Проверяем, не находится ли пользователь в каком-либо процессе
+        current_state = await state.get_state()
+        if current_state is not None:
+            await message.answer("⏳ Сначала завершите текущее действие (отправьте /cancel или нажмите «Отмена»).", reply_markup=main_menu())
+            return
+        
         if not await _ensure_registered(message, state):
             return
         await state.set_state(CreateMeeting.subject)
@@ -669,6 +670,12 @@ async def main() -> None:
     # ===== Переговорки =====
     @dp.message(F.text == "🏢 Переговорки")
     async def rooms_menu(message: types.Message, state: FSMContext):
+        # Проверяем, не находится ли пользователь в каком-либо процессе
+        current_state = await state.get_state()
+        if current_state is not None:
+            await message.answer("⏳ Сначала завершите текущее действие (отправьте /cancel или нажмите «Отмена»).", reply_markup=main_menu())
+            return
+        
         if not await _ensure_registered(message, state):
             return
         builder = InlineKeyboardBuilder()
@@ -943,12 +950,18 @@ async def main() -> None:
     # ===== Удалить/перенести =====
     @dp.message(F.text == "🗑 Удалить/перенести")
     async def delete_or_reschedule(message: types.Message, state: FSMContext):
+        # Проверяем, не находится ли пользователь в каком-либо процессе
+        current_state = await state.get_state()
+        if current_state is not None:
+            await message.answer("⏳ Сначала завершите текущее действие (отправьте /cancel или нажмите «Отмена»).", reply_markup=main_menu())
+            return
+        
         if not await _ensure_registered(message, state):
             return
         api = _get_user_calendar_api(message.from_user.id)
         events = api.get_upcoming_events(days=3)
         if not events:
-            await message.answer("Нет предстоящих встреч.")
+            await message.answer("Нет предстоящих встреч.", reply_markup=main_menu())
             return
         builder = InlineKeyboardBuilder()
         events_map = []
@@ -1065,6 +1078,12 @@ async def main() -> None:
     # ===== Помощь =====
     @dp.message(F.text == "❓ Помощь")
     async def help_message(message: types.Message, state: FSMContext):
+        # Проверяем, не находится ли пользователь в каком-либо процессе
+        current_state = await state.get_state()
+        if current_state is not None:
+            await message.answer("⏳ Сначала завершите текущее действие (отправьте /cancel или нажмите «Отмена»).", reply_markup=main_menu())
+            return
+        
         if not await _ensure_registered(message, state):
             return
         await message.answer(
