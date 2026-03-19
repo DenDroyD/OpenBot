@@ -101,37 +101,52 @@ class CalendarAPI:
             # Фильтруем встречи по location или attendees
             room_events = []
             for ev in all_events:
-                # Проверяем location (место проведения)
+                is_room_found = False
+                
+                # 1. Проверяем location (место проведения)
                 if ev.location:
                     location_lower = ev.location.lower()
                     room_name_lower = room_name.lower()
                     room_email_lower = room_email.lower()
                     
-                    # Ищем название комнаты в location
+                    # Ищем название комнаты или email в location
+                    # "Москва" найдет "Переговорная Москва"
+                    # "СПб" найдет "Переговорная Санкт-Петербург"
                     if room_name_lower in location_lower or room_email_lower in location_lower:
-                        room_events.append(ev)
-                        continue
+                        is_room_found = True
+                        print(f"📍 Найдено по location: {ev.subject} в {ev.location}")
+                    
+                    # Для СПб: проверяем альтернативные названия
+                    if not is_room_found and room_name_lower == "спб":
+                        if "санкт-петербург" in location_lower or "петербург" in location_lower:
+                            is_room_found = True
+                            print(f"📍 Найдено СПб по location: {ev.subject} в {ev.location}")
                 
-                # Проверяем required_attendees
-                if hasattr(ev, 'required_attendees') and ev.required_attendees:
-                    for att in ev.required_attendees:
-                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
-                            if att.mailbox.email_address.lower() == room_email.lower():
-                                room_events.append(ev)
-                                break
-                    else:
-                        continue  # Если нашли в required, переходим к следующей встрече
-                
-                # Проверяем optional_attendees
-                if hasattr(ev, 'optional_attendees') and ev.optional_attendees:
-                    for att in ev.optional_attendees:
-                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
-                            if att.mailbox.email_address.lower() == room_email.lower():
-                                room_events.append(ev)
-                                break
+                # 2. Если не нашли по location, проверяем attendees
+                if not is_room_found:
+                    # Проверяем required_attendees
+                    if hasattr(ev, 'required_attendees') and ev.required_attendees:
+                        for att in ev.required_attendees:
+                            if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
+                                if att.mailbox.email_address.lower() == room_email.lower():
+                                    is_room_found = True
+                                    print(f"👥 Найдено по required_attendee: {ev.subject}")
+                                    break
+                    
+                    # Проверяем optional_attendees
+                    if not is_room_found and hasattr(ev, 'optional_attendees') and ev.optional_attendees:
+                        for att in ev.optional_attendees:
+                            if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
+                                if att.mailbox.email_address.lower() == room_email.lower():
+                                    is_room_found = True
+                                    print(f"👥 Найдено по optional_attendee: {ev.subject}")
+                                    break
+
+                if is_room_found:
+                    room_events.append(ev)
 
             # ЛОГИРОВАНИЕ
-            print(f"✅ Метод 2 сработал! Найдено {len(room_events)} событий по location/attendees")
+            print(f"✅ Метод 2 нашел {len(room_events)} событий")
             
             if room_events:
                 return sorted(room_events, key=lambda x: x.start)
