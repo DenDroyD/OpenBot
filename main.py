@@ -699,6 +699,12 @@ async def main() -> None:
         )
         await callback.answer()
 
+    @dp.callback_query(F.data == "back_to_main_from_rooms")
+    async def back_to_main_from_rooms(callback: types.CallbackQuery, state: FSMContext):
+        await state.clear()
+        await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
+        await callback.answer()
+
     @dp.callback_query(F.data == "room_back_to_rooms")
     async def room_back_to_rooms(callback: types.CallbackQuery, state: FSMContext):
         # Очищаем состояние и показываем выбор города (МСК/СПб)
@@ -707,19 +713,12 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="🏢 Москва", callback_data="info_msk")
         builder.button(text="🏢 СПб", callback_data="info_spb")
-        builder.button(text="🔙 Главное меню", callback_data="back_to_main_menu")
-        builder.adjust(1)
+        builder.adjust(2)
         
         await callback.message.edit_text(
             "🏢 Выберите переговорную:",
             reply_markup=builder.as_markup()
         )
-        await callback.answer()
-
-    @dp.callback_query(F.data == "back_to_main_menu")
-    async def back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
-        await state.clear()
-        await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
         await callback.answer()
 
     @dp.callback_query(F.data == "room_schedule")
