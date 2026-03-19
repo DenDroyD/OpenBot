@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, EWSTimeZone, NTLM
-from exchangelib.items import CalendarItem, SEND_TO_ALL_AND_SAVE_COPY
+from exchangelib.items import CalendarItem, SEND_TO_ALL_AND_SAVE_COPY, SEND_TO_NONE
 from exchangelib.properties import Attendee, Mailbox
 from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
 
@@ -518,7 +518,8 @@ class CalendarAPI:
         try:
             item = self.account.calendar.get(id=event_id)
             if item:
-                item.delete()
+                # Удаляем встречу БЕЗ отправки уведомлений участникам
+                item.delete(send_cancellation_to_clients=SEND_TO_NONE)
                 return True
             return False
         except Exception:

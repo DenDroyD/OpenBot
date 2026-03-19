@@ -372,7 +372,7 @@ async def main() -> None:
         if not await _ensure_registered(message, state):
             return
         await state.set_state(CreateMeeting.subject)
-        await message.answer("Введите тему встречи:", reply_markup=types.ReplyKeyboardRemove())
+        await message.answer("Введите тему встречи:", reply_markup=main_menu())
 
     @dp.message(CreateMeeting.subject)
     async def create_subject(message: types.Message, state: FSMContext):
