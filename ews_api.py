@@ -61,40 +61,86 @@ class CalendarAPI:
 
     def get_room_events(self, room_name: str, date: date_cls) -> Optional[List[CalendarItem]]:
         """
-        Получает события из календаря переговорной комнаты.
-        Использует альтернативный метод: поиск в ВАШЕМ календаре встреч, где участвует комната.
-        Это показывает только те встречи, где вы участник или комната отображается в вашем календаре.
+        Получает события комнаты за весь день.
+        Пытается получить через прямой доступ к календарю комнаты.
+        Если нет прав доступа, использует альтернативный метод через поиск встреч с комнатой.
         """
         if room_name not in self.cfg.rooms:
             return None
         room_email = self.cfg.rooms[room_name]
 
+        # Метод 1: Прямой доступ к календарю комнаты
         try:
-            # Получаем ВСЕ встречи из ВАШЕГО календаря за день
+            room_account = Account(
+                primary_smtp_address=room_email,
+                config=self.account.config,
+                autodiscover=False,
+                access_type=DELEGATE,
+            )
+            start = self._make_tz_aware(datetime.combine(date, time.min))
+            end = self._make_tz_aware(datetime.combine(date, time.max))
+            events = list(room_account.calendar.view(start, end))
+            
+            # ЛОГИРОВАНИЕ
+            print(f"✅ Метод 1 сработал! Найдено {len(events)} событий в {room_email}")
+            
+            if events:
+                return sorted(events, key=lambda x: x.start)
+        except Exception as e:
+            # ЛОГИРОВАНИЕ
+            print(f"⚠️ Метод 1 не сработал: {type(e).__name__}: {e}")
+            pass
+
+        # Метод 2: Получаем ВСЕ встречи за день из ВАШЕГО календаря
+        # И фильтруем по location ИЛИ по участникам
+        try:
             start = self._make_tz_aware(datetime.combine(date, time.min))
             end = self._make_tz_aware(datetime.combine(date, time.max))
             all_events = list(self.account.calendar.view(start, end))
 
-            # Фильтруем только те, где участвует комната
+            # Фильтруем встречи по location или attendees
             room_events = []
             for ev in all_events:
-                # Проверяем location
-                if ev.location and room_email.lower() in ev.location.lower():
-                    room_events.append(ev)
-                    continue
+                # Проверяем location (место проведения)
+                if ev.location:
+                    location_lower = ev.location.lower()
+                    room_name_lower = room_name.lower()
+                    room_email_lower = room_email.lower()
+                    
+                    # Ищем название комнаты в location
+                    if room_name_lower in location_lower or room_email_lower in location_lower:
+                        room_events.append(ev)
+                        continue
                 
-                # Проверяем attendees
-                for attendees_list in [getattr(ev, 'required_attendees', []) or [], 
-                                       getattr(ev, 'optional_attendees', []) or []]:
-                    for att in attendees_list:
+                # Проверяем required_attendees
+                if hasattr(ev, 'required_attendees') and ev.required_attendees:
+                    for att in ev.required_attendees:
+                        if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
+                            if att.mailbox.email_address.lower() == room_email.lower():
+                                room_events.append(ev)
+                                break
+                    else:
+                        continue  # Если нашли в required, переходим к следующей встрече
+                
+                # Проверяем optional_attendees
+                if hasattr(ev, 'optional_attendees') and ev.optional_attendees:
+                    for att in ev.optional_attendees:
                         if hasattr(att, 'mailbox') and hasattr(att.mailbox, 'email_address'):
                             if att.mailbox.email_address.lower() == room_email.lower():
                                 room_events.append(ev)
                                 break
 
-            return sorted(room_events, key=lambda x: x.start) if room_events else []
-        except Exception:
-            return None
+            # ЛОГИРОВАНИЕ
+            print(f"✅ Метод 2 сработал! Найдено {len(room_events)} событий по location/attendees")
+            
+            if room_events:
+                return sorted(room_events, key=lambda x: x.start)
+        except Exception as e:
+            # ЛОГИРОВАНИЕ
+            print(f"⚠️ Метод 2 не сработал: {type(e).__name__}: {e}")
+            pass
+
+        return None
 
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:
@@ -170,6 +216,7 @@ class CalendarAPI:
         Использует GetFreeBusyInfo для получения информации о занятости.
         Возвращает список кортежей (start, end) - периоды когда комната занята.
         Если нет доступа - возвращает None.
+        Объединяет смежные или перекрывающиеся периоды.
         """
         if room_name not in self.cfg.rooms:
             return None
@@ -199,9 +246,35 @@ class CalendarAPI:
             
             # Сортируем периоды по времени начала
             busy_periods.sort(key=lambda x: x[0])
-            return busy_periods
             
-        except Exception:
+            # Объединяем смежные и перекрывающиеся периоды
+            if len(busy_periods) <= 1:
+                return busy_periods
+            
+            merged_periods = [busy_periods[0]]
+            for current_start, current_end in busy_periods[1:]:
+                last_start, last_end = merged_periods[-1]
+                
+                # Если текущий период начинается сразу после последнего или перекрывается с ним
+                # (с учетом возможной разницы в 1 минуту из-за округления)
+                if current_start <= last_end or (current_start - last_end).total_seconds() <= 60:
+                    # Объединяем периоды, беря максимальный конец
+                    new_end = max(last_end, current_end)
+                    merged_periods[-1] = (last_start, new_end)
+                else:
+                    # Добавляем как отдельный период
+                    merged_periods.append((current_start, current_end))
+            
+            # ЛОГИРОВАНИЕ
+            print(f"📊 GetFreeBusyInfo: найдено {len(busy_periods)} периодов, после объединения: {len(merged_periods)}")
+            for start, end in merged_periods:
+                print(f"   {start.strftime('%H:%M')} - {end.strftime('%H:%M')}")
+            
+            return merged_periods
+            
+        except Exception as e:
+            # ЛОГИРОВАНИЕ
+            print(f"⚠️ GetFreeBusyInfo не сработал: {type(e).__name__}: {e}")
             # Если GetFreeBusyInfo не сработал, пробуем получить из календаря
             events = self.get_room_events(room_name, date)
             if events is None:
@@ -212,7 +285,27 @@ class CalendarAPI:
                 busy_periods.append((ev.start, ev.end))
             
             busy_periods.sort(key=lambda x: x[0])
-            return busy_periods if busy_periods else []
+            
+            # Объединяем смежные и перекрывающиеся периоды
+            if len(busy_periods) <= 1:
+                return busy_periods
+            
+            merged_periods = [busy_periods[0]]
+            for current_start, current_end in busy_periods[1:]:
+                last_start, last_end = merged_periods[-1]
+                
+                if current_start <= last_end or (current_start - last_end).total_seconds() <= 60:
+                    new_end = max(last_end, current_end)
+                    merged_periods[-1] = (last_start, new_end)
+                else:
+                    merged_periods.append((current_start, current_end))
+            
+            # ЛОГИРОВАНИЕ
+            print(f"📊 Календарь: найдено {len(busy_periods)} событий, после объединения: {len(merged_periods)}")
+            for start, end in merged_periods:
+                print(f"   {start.strftime('%H:%M')} - {end.strftime('%H:%M')}")
+            
+            return merged_periods if merged_periods else []
 
     def create_event(
         self,

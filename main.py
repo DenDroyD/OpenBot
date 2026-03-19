@@ -689,7 +689,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="📅 Узнать расписание", callback_data="room_schedule")
         builder.button(text="➕ Забронировать", callback_data="room_book")
-        builder.button(text="🔙 Назад в меню", callback_data="room_back_main")
+        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
         builder.adjust(1)
 
         await callback.message.edit_text(
@@ -699,8 +699,25 @@ async def main() -> None:
         )
         await callback.answer()
 
-    @dp.callback_query(F.data == "room_back_main")
-    async def room_back_to_main(callback: types.CallbackQuery, state: FSMContext):
+    @dp.callback_query(F.data == "room_back_to_rooms")
+    async def room_back_to_rooms(callback: types.CallbackQuery, state: FSMContext):
+        # Очищаем состояние и показываем выбор города (МСК/СПб)
+        await state.clear()
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🏢 Москва", callback_data="info_msk")
+        builder.button(text="🏢 СПб", callback_data="info_spb")
+        builder.button(text="🔙 Главное меню", callback_data="back_to_main_menu")
+        builder.adjust(1)
+        
+        await callback.message.edit_text(
+            "🏢 Выберите переговорную:",
+            reply_markup=builder.as_markup()
+        )
+        await callback.answer()
+
+    @dp.callback_query(F.data == "back_to_main_menu")
+    async def back_to_main_menu(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
         await callback.message.edit_text("Главное меню:", reply_markup=main_menu())
         await callback.answer()
@@ -717,7 +734,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="Сегодня", callback_data="room_today_btn")
         builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.button(text="🔙 Назад в меню", callback_data="room_back_main")
+        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
         builder.adjust(1)
 
         await callback.message.edit_text(
@@ -773,7 +790,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="Сегодня", callback_data="room_today_btn")
         builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.button(text="🔙 Назад в меню", callback_data="room_back_main")
+        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
         builder.adjust(1)
         
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
@@ -798,11 +815,11 @@ async def main() -> None:
 
         # Запрашиваем ввод даты через модальное окно или сообщение
         builder = InlineKeyboardBuilder()
-        builder.button(text="🔙 Назад в меню", callback_data="room_back_main")
+        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
         builder.adjust(1)
         
         await callback.message.edit_text(
-            "Напишите интересующий день (например: завтра, 15 марта, следующий четверг).\n\nИли нажмите «Назад».",
+            "Напишите интересующий день (например: завтра, 15 марта, следующий четверг).\n\nИли нажмите «К комнатам».",
             reply_markup=builder.as_markup()
         )
         await state.set_state(RoomScheduleStates.waiting_for_date)
@@ -859,10 +876,12 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="Сегодня", callback_data="room_today_btn")
         builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.button(text="🔙 Назад в меню", callback_data="room_back_main")
+        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
         builder.adjust(1)
         
         await message.answer(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+        # Очищаем состояние после показа результата
+        await state.clear()
 
 
     @dp.callback_query(F.data == "room_book")
