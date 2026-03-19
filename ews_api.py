@@ -167,7 +167,8 @@ class CalendarAPI:
             return []
         
         room_email = self.cfg.rooms[room_name]
-        tz = EWSTimeZone.timezone('Europe/Moscow')
+        # Используем правильный метод для получения часового пояса в новых версиях exchangelib
+        tz = EWSTimeZone('Europe/Moscow')
         
         # Формируем начало и конец дня в нужном часовом поясе
         start_dt = datetime.combine(date, time.min)

@@ -689,7 +689,6 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="📅 Узнать расписание", callback_data="room_schedule")
         builder.button(text="➕ Забронировать", callback_data="room_book")
-        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
 
         await callback.message.edit_text(
