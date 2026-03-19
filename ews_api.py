@@ -181,12 +181,14 @@ class CalendarAPI:
         logging.info(f"[FreeBusy] Интервал запроса: {start} - {end}")
         
         try:
-            # Метод 1: Попытка вызвать get_free_busy_info с передачей списка email-адресов (строк)
-            # Это работает в большинстве версий exchangelib для простых запросов
-            logging.info(f"[FreeBusy] Попытка 1: Вызов get_free_busy_info с accounts=[email_string]...")
+            # Метод 1: Вызов get_free_busy_info с правильным форматом accounts
+            # accounts должен быть списком кортежей: [(account, attendee_type, exclude_conflicts), ...]
+            # attendee_type: 'Optional', 'Optional', 'Resource', 'Required'
+            # exclude_conflicts: True/False
+            logging.info(f"[FreeBusy] Попытка 1: Вызов get_free_busy_info с accounts=[(email, 'Optional', False)]...")
             
             fb_views = self.account.protocol.get_free_busy_info(
-                accounts=[room_email],  # Передаем просто строку с email
+                accounts=[(room_email, 'Optional', False)],  # Передаем кортеж (email, attendee_type, exclude_conflicts)
                 start=start,
                 end=end,
             )
@@ -253,57 +255,6 @@ class CalendarAPI:
             
             return merged_periods
             
-        except TypeError as te:
-            # Обработка ошибки "unexpected keyword argument 'accounts'"
-            logging.warning(f"[FreeBusy] Ошибка типа аргументов (TypeError): {te}")
-            logging.info(f"[FreeBusy] Попытка 2: Вызов с параметром 'attendees' вместо 'accounts'...")
-            
-            try:
-                fb_views = self.account.protocol.get_free_busy_info(
-                    attendees=[room_email],
-                    start=start,
-                    end=end,
-                )
-                
-                if not fb_views or len(fb_views) == 0:
-                    logging.warning(f"[FreeBusy] Пустой ответ при попытке 2 для {room_email}")
-                    return []
-                
-                fb_view = fb_views[0]
-                busy_periods = []
-                
-                if hasattr(fb_view, 'busy_periods') and fb_view.busy_periods:
-                    for idx, period in enumerate(fb_view.busy_periods):
-                        status = getattr(period, 'free_busy_status', None)
-                        status_value = status.value if status else 'Unknown'
-                        
-                        p_start = period.start.astimezone(self.TZ)
-                        p_end = period.end.astimezone(self.TZ)
-                        
-                        if status and status_value != 'Free':
-                            busy_periods.append((p_start, p_end))
-                
-                busy_periods.sort(key=lambda x: x[0])
-                
-                if not busy_periods:
-                    return []
-                    
-                merged_periods = [busy_periods[0]]
-                for current_start, current_end in busy_periods[1:]:
-                    last_start, last_end = merged_periods[-1]
-                    if current_start <= last_end:
-                        new_end = max(last_end, current_end)
-                        merged_periods[-1] = (last_start, new_end)
-                    else:
-                        merged_periods.append((current_start, current_end))
-                
-                logging.info(f"[FreeBusy] Попытка 2 успешна: {len(merged_periods)} периодов для {room_name}")
-                return merged_periods
-                
-            except Exception as e2:
-                logging.error(f"[FreeBusy] Попытка 2 также неудачна: {type(e2).__name__}: {e2}", exc_info=True)
-                return []
-        
         except Exception as e:
             logging.error(f"[FreeBusy] Критическая ошибка для {room_email}: {type(e).__name__}: {e}", exc_info=True)
             return []
@@ -324,19 +275,10 @@ class CalendarAPI:
             ews_start = self._make_tz_aware(start)
             ews_end = self._make_tz_aware(end)
             
-            # Создаем временный аккаунт для комнаты
-            from exchangelib import Account
-            room_account = Account(
-                primary_smtp_address=room_email,
-                config=self.account.config,
-                autodiscover=False,
-                access_type=DELEGATE,
-            )
-            
             # Используем протокол для получения информации о занятости
-            # В новых версиях используется параметр 'accounts'
+            # accounts должен быть списком кортежей: [(account, attendee_type, exclude_conflicts), ...]
             free_busy_info = self.account.protocol.get_free_busy_info(
-                accounts=[room_account],
+                accounts=[(room_email, 'Resource', False)],  # Используем 'Resource' для комнаты
                 start=ews_start,
                 end=ews_end,
             )
@@ -403,19 +345,10 @@ class CalendarAPI:
             day_start = self._make_tz_aware(datetime.combine(date, time.min))
             day_end = self._make_tz_aware(datetime.combine(date, time.max))
             
-            # Создаем временный аккаунт для комнаты
-            from exchangelib import Account
-            room_account = Account(
-                primary_smtp_address=room_email,
-                config=self.account.config,
-                autodiscover=False,
-                access_type=DELEGATE,
-            )
-            
             # Получаем информацию о занятости через GetFreeBusyInfo
-            # В новых версиях используется параметр 'accounts'
+            # accounts должен быть списком кортежей: [(account, attendee_type, exclude_conflicts), ...]
             free_busy_info = self.account.protocol.get_free_busy_info(
-                accounts=[room_account],
+                accounts=[(room_email, 'Resource', False)],  # Используем 'Resource' для комнаты
                 start=day_start,
                 end=day_end,
             )
