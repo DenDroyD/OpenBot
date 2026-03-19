@@ -157,6 +157,85 @@ class CalendarAPI:
 
         return None
 
+    def get_room_freebusy_periods(self, room_name: str, date: date_cls) -> List[Tuple[datetime, datetime]]:
+        """
+        Получает периоды занятости комнаты через Free/Busy API.
+        Этот метод работает БЕЗ прав доступа к календарю комнаты, используя стандартный механизм Exchange.
+        Возвращает список кортежей (start, end) занятых периодов в московском времени.
+        """
+        if room_name not in self.cfg.rooms:
+            return []
+        
+        room_email = self.cfg.rooms[room_name]
+        tz = EWSTimeZone.timezone('Europe/Moscow')
+        
+        # Формируем начало и конец дня в нужном часовом поясе
+        start_dt = datetime.combine(date, time.min)
+        end_dt = datetime.combine(date, time.max)
+        
+        start = self._make_tz_aware(start_dt)
+        end = self._make_tz_aware(end_dt)
+        
+        try:
+            # Запрос Free/Busy информации
+            # Возвращает список объектов FreeBusyView (по одному на каждый email в запросе)
+            fb_views = self.account.protocol.get_free_busy_info(
+                attendees=[room_email],
+                start=start,
+                end=end,
+            )
+            
+            if not fb_views or len(fb_views) == 0:
+                logging.warning(f"FreeBusy: пустой ответ для {room_email}")
+                return []
+            
+            fb_view = fb_views[0]
+            busy_periods = []
+            
+            # Извлекаем периоды занятости
+            if hasattr(fb_view, 'busy_periods') and fb_view.busy_periods:
+                for period in fb_view.busy_periods:
+                    # Статусы: 'Free', 'Tentative', 'Busy', 'OOF'
+                    # Нас интересуют все, кроме 'Free'
+                    status = getattr(period, 'free_busy_status', None)
+                    if status and status != 'Free':
+                        p_start = period.start.astimezone(tz)
+                        p_end = period.end.astimezone(tz)
+                        busy_periods.append((p_start, p_end))
+                        logging.debug(f"  Период: {p_start.strftime('%H:%M')} - {p_end.strftime('%H:%M')} ({status})")
+            
+            # Сортируем по времени начала
+            busy_periods.sort(key=lambda x: x[0])
+            
+            # Объединяем смежные и перекрывающиеся интервалы
+            # Например: 11:30-12:00 и 12:00-13:00 -> 11:30-13:00
+            if not busy_periods:
+                logging.info(f"FreeBusy для {room_name}: нет занятых периодов")
+                return []
+                
+            merged_periods = [busy_periods[0]]
+            
+            for current_start, current_end in busy_periods[1:]:
+                last_start, last_end = merged_periods[-1]
+                
+                # Если текущий начинается раньше или ровно когда закончился предыдущий
+                if current_start <= last_end:
+                    # Продлеваем последний период, если текущий заканчивается позже
+                    new_end = max(last_end, current_end)
+                    merged_periods[-1] = (last_start, new_end)
+                else:
+                    # Добавляем новый отдельный период
+                    merged_periods.append((current_start, current_end))
+            
+            logging.info(f"FreeBusy для {room_name}: найдено {len(busy_periods)} периодов, объединено в {len(merged_periods)}")
+            for i, (s, e) in enumerate(merged_periods):
+                logging.info(f"  [{i+1}] {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+            return merged_periods
+            
+        except Exception as e:
+            logging.error(f"Ошибка GetFreeBusyInfo для {room_email}: {e}", exc_info=True)
+            return []
+
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:
         """

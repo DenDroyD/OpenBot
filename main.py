@@ -689,7 +689,7 @@ async def main() -> None:
         builder = InlineKeyboardBuilder()
         builder.button(text="📅 Узнать расписание", callback_data="room_schedule")
         builder.button(text="➕ Забронировать", callback_data="room_book")
-        builder.button(text="🔙 К комнатам", callback_data="room_back_to_rooms")
+        builder.button(text="🔙 В главное меню", callback_data="back_to_main_from_rooms")
         builder.adjust(1)
 
         await callback.message.edit_text(
@@ -764,26 +764,21 @@ async def main() -> None:
         current_dt = get_current_datetime_msk()
         today = current_dt.date()
 
-        # Получаем периоды занятости через новую функцию
-        busy_periods = api.get_room_busy_periods(room, today)
+        # Получаем периоды занятости через новую функцию Free/Busy
+        busy_periods = api.get_room_freebusy_periods(room, today)
         
         # Формируем текст ответа
         text = f"🏢 **{room}** – сегодня, {today.strftime('%d.%m.%Y')}\n\n"
         
-        if busy_periods is not None:
+        if busy_periods:
             # Успешно получили периоды занятости
-            if busy_periods:
-                text += "**Периоды занятости:**\n"
-                for start_dt, end_dt in busy_periods:
-                    start_time = start_dt.strftime("%H:%M")
-                    end_time = end_dt.strftime("%H:%M")
-                    text += f"{start_time} - {end_time} - занята\n"
-            else:
-                text += "✅ Свободна на весь день."
+            text += "**Периоды занятости:**\n"
+            for start_dt, end_dt in busy_periods:
+                start_time = start_dt.strftime("%H:%M")
+                end_time = end_dt.strftime("%H:%M")
+                text += f"{start_time} - {end_time} - занята\n"
         else:
-            # Нет доступа к календарю или Free/Busy
-            text += "⚠️ Не удалось получить информацию о занятости переговорки.\n"
-            text += "(Подробное расписание недоступно из-за ограничений доступа)"
+            text += "✅ Свободна на весь день."
 
         # Возвращаем меню расписания
         builder = InlineKeyboardBuilder()
@@ -850,26 +845,21 @@ async def main() -> None:
 
         api = _get_user_calendar_api(message.from_user.id)
 
-        # Получаем периоды занятости через новую функцию
-        busy_periods = api.get_room_busy_periods(room, d)
+        # Получаем периоды занятости через новую функцию Free/Busy
+        busy_periods = api.get_room_freebusy_periods(room, d)
 
         # Формируем текст ответа
         text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')}\n\n"
         
-        if busy_periods is not None:
+        if busy_periods:
             # Успешно получили периоды занятости
-            if busy_periods:
-                text += "**Периоды занятости:**\n"
-                for start_dt, end_dt in busy_periods:
-                    start_time = start_dt.strftime("%H:%M")
-                    end_time = end_dt.strftime("%H:%M")
-                    text += f"{start_time} - {end_time} - занята\n"
-            else:
-                text += "✅ Свободна на весь день."
+            text += "**Периоды занятости:**\n"
+            for start_dt, end_dt in busy_periods:
+                start_time = start_dt.strftime("%H:%M")
+                end_time = end_dt.strftime("%H:%M")
+                text += f"{start_time} - {end_time} - занята\n"
         else:
-            # Нет доступа к календарю или Free/Busy
-            text += "⚠️ Не удалось получить информацию о занятости переговорки.\n"
-            text += "(Подробное расписание недоступно из-за ограничений доступа)"
+            text += "✅ Свободна на весь день."
 
         # Возвращаем меню расписания вместо главного меню
         builder = InlineKeyboardBuilder()
