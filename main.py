@@ -786,14 +786,9 @@ async def main() -> None:
         if not free_periods and not busy_periods:
             text += "✅ Свободна на весь день."
 
-        # Возвращаем меню расписания
-        builder = InlineKeyboardBuilder()
-        builder.button(text="Сегодня", callback_data="room_today_btn")
-        builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.adjust(1)
-        
+        # Отправляем текст без кнопок (расписание уже показано)
         try:
-            await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
+            await callback.message.edit_text(text, parse_mode="Markdown")
         except Exception as e:
             if "message is not modified" in str(e):
                 # Игнорируем ошибку, если контент не изменился
@@ -875,13 +870,8 @@ async def main() -> None:
         if not free_periods and not busy_periods:
             text += "✅ Свободна на весь день."
 
-        # Возвращаем меню расписания вместо главного меню
-        builder = InlineKeyboardBuilder()
-        builder.button(text="Сегодня", callback_data="room_today_btn")
-        builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
-        builder.adjust(1)
-        
-        await message.answer(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+        # Отправляем текст без кнопок (расписание уже показано)
+        await message.answer(text, parse_mode="Markdown")
         # Очищаем состояние после показа результата
         await state.clear()
 
@@ -953,9 +943,10 @@ async def main() -> None:
         events_map = []
         for idx, ev in enumerate(events[:5]):
             events_map.append({"index": idx, "event_id": str(ev.id)})
-            start = ev.start.strftime("%d.%m %H:%M")
+            # Конвертируем время в московский часовой пояс перед форматированием
+            start_msk = ev.start.astimezone(tz).strftime("%d.%m %H:%M")
             subj = (ev.subject or "Без темы")[:20]
-            builder.button(text=f"{start} – {subj}", callback_data=f"event_{idx}")
+            builder.button(text=f"{start_msk} – {subj}", callback_data=f"event_{idx}")
         builder.adjust(1)
         await state.update_data(events_map=events_map)
         await state.set_state(RescheduleMeeting.choosing_event)
