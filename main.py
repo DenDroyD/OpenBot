@@ -763,20 +763,27 @@ async def main() -> None:
         current_dt = get_current_datetime_msk()
         today = current_dt.date()
 
-        # Получаем периоды занятости через новую функцию Free/Busy
-        busy_periods = api.get_room_freebusy_periods(room, today)
-        
+        # Получаем периоды занятости и свободы через новую функцию Free/Busy
+        busy_periods, free_periods = api.get_room_freebusy_periods(room, today)
+
         # Формируем текст ответа
         text = f"🏢 **{room}** – сегодня, {today.strftime('%d.%m.%Y')}\n\n"
-        
+
+        if free_periods:
+            text += "🟢 **Свободно:**\n"
+            for start_dt, end_dt in free_periods:
+                start_time = start_dt.strftime("%H:%M")
+                end_time = end_dt.strftime("%H:%M")
+                text += f"   {start_time}–{end_time}\n"
+
         if busy_periods:
-            # Успешно получили периоды занятости
-            text += "**Периоды занятости:**\n"
+            text += "\n🔴 **Занято:**\n"
             for start_dt, end_dt in busy_periods:
                 start_time = start_dt.strftime("%H:%M")
                 end_time = end_dt.strftime("%H:%M")
-                text += f"{start_time} - {end_time} - занята\n"
-        else:
+                text += f"   {start_time}–{end_time}\n"
+
+        if not free_periods and not busy_periods:
             text += "✅ Свободна на весь день."
 
         # Возвращаем меню расписания
@@ -845,20 +852,27 @@ async def main() -> None:
 
         api = _get_user_calendar_api(message.from_user.id)
 
-        # Получаем периоды занятости через новую функцию Free/Busy
-        busy_periods = api.get_room_freebusy_periods(room, d)
+        # Получаем периоды занятости и свободы через новую функцию Free/Busy
+        busy_periods, free_periods = api.get_room_freebusy_periods(room, d)
 
         # Формируем текст ответа
         text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')}\n\n"
-        
+
+        if free_periods:
+            text += "🟢 **Свободно:**\n"
+            for start_dt, end_dt in free_periods:
+                start_time = start_dt.strftime("%H:%M")
+                end_time = end_dt.strftime("%H:%M")
+                text += f"   {start_time}–{end_time}\n"
+
         if busy_periods:
-            # Успешно получили периоды занятости
-            text += "**Периоды занятости:**\n"
+            text += "\n🔴 **Занято:**\n"
             for start_dt, end_dt in busy_periods:
                 start_time = start_dt.strftime("%H:%M")
                 end_time = end_dt.strftime("%H:%M")
-                text += f"{start_time} - {end_time} - занята\n"
-        else:
+                text += f"   {start_time}–{end_time}\n"
+
+        if not free_periods and not busy_periods:
             text += "✅ Свободна на весь день."
 
         # Возвращаем меню расписания вместо главного меню
