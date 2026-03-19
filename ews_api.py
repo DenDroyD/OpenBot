@@ -164,6 +164,56 @@ class CalendarAPI:
                     )
             return True, "Слот свободен."
 
+    def get_room_busy_periods(self, room_name: str, date: date_cls) -> Optional[List[Tuple[datetime, datetime]]]:
+        """
+        Получает все периоды занятости переговорки за указанный день.
+        Использует GetFreeBusyInfo для получения информации о занятости.
+        Возвращает список кортежей (start, end) - периоды когда комната занята.
+        Если нет доступа - возвращает None.
+        """
+        if room_name not in self.cfg.rooms:
+            return None
+        
+        room_email = self.cfg.rooms[room_name]
+        
+        try:
+            # Определяем начало и конец дня в часовом поясе
+            day_start = self._make_tz_aware(datetime.combine(date, time.min))
+            day_end = self._make_tz_aware(datetime.combine(date, time.max))
+            
+            # Получаем информацию о занятости через GetFreeBusyInfo
+            free_busy_info = self.account.protocol.get_free_busy_info(
+                attendees=[room_email],
+                start=day_start,
+                end=day_end,
+            )
+            
+            busy_periods = []
+            for status in free_busy_info:
+                if hasattr(status, 'busy_periods') and status.busy_periods:
+                    for period in status.busy_periods:
+                        # Сохраняем периоды занятости, конвертируя в наш часовой пояс
+                        period_start = period.start.astimezone(self.TZ) if hasattr(period.start, 'astimezone') else period.start
+                        period_end = period.end.astimezone(self.TZ) if hasattr(period.end, 'astimezone') else period.end
+                        busy_periods.append((period_start, period_end))
+            
+            # Сортируем периоды по времени начала
+            busy_periods.sort(key=lambda x: x[0])
+            return busy_periods
+            
+        except Exception:
+            # Если GetFreeBusyInfo не сработал, пробуем получить из календаря
+            events = self.get_room_events(room_name, date)
+            if events is None:
+                return None
+            
+            busy_periods = []
+            for ev in events:
+                busy_periods.append((ev.start, ev.end))
+            
+            busy_periods.sort(key=lambda x: x[0])
+            return busy_periods if busy_periods else []
+
     def create_event(
         self,
         *,

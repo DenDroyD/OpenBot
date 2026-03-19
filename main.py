@@ -748,31 +748,26 @@ async def main() -> None:
         current_dt = get_current_datetime_msk()
         today = current_dt.date()
 
-        events = api.get_room_events(room, today)
+        # Получаем периоды занятости через новую функцию
+        busy_periods = api.get_room_busy_periods(room, today)
         
         # Формируем текст ответа
-        text = f"🏢 **{room}** – сегодня, {today.strftime('%d.%m.%Y')} (предстоящие)\n\n"
+        text = f"🏢 **{room}** – сегодня, {today.strftime('%d.%m.%Y')}\n\n"
         
-        if events is not None:
-            # Есть доступ к календарю комнаты, показываем события
-            future_events = [ev for ev in events if ev.end > current_dt]
-            if future_events:
-                text += "\n".join([format_room_event(e) for e in future_events])
+        if busy_periods is not None:
+            # Успешно получили периоды занятости
+            if busy_periods:
+                text += "**Периоды занятости:**\n"
+                for start_dt, end_dt in busy_periods:
+                    start_time = start_dt.strftime("%H:%M")
+                    end_time = end_dt.strftime("%H:%M")
+                    text += f"{start_time} - {end_time} - занята\n"
             else:
-                text += "📭 На сегодня предстоящих бронирований нет."
-        else:
-            # Нет доступа к календарю, проверяем занятость через GetFreeBusyInfo
-            # Проверяем весь день с 00:00 до 23:59
-            day_start = current_dt.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = current_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
-            
-            available, msg = api.is_room_available(room, day_start, day_end)
-            if available:
                 text += "✅ Свободна на весь день."
-            else:
-                # msg содержит информацию о занятости
-                text += f"⚠️ {msg}"
-                text += "\n\n(Подробное расписание недоступно из-за ограничений доступа)"
+        else:
+            # Нет доступа к календарю или Free/Busy
+            text += "⚠️ Не удалось получить информацию о занятости переговорки.\n"
+            text += "(Подробное расписание недоступно из-за ограничений доступа)"
 
         # Возвращаем меню расписания
         builder = InlineKeyboardBuilder()
@@ -783,6 +778,7 @@ async def main() -> None:
         
         await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="Markdown")
         await callback.answer()
+
 
     @dp.callback_query(F.data == "room_choose_day_btn")
     async def room_choose_day_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -812,6 +808,7 @@ async def main() -> None:
         await state.set_state(RoomScheduleStates.waiting_for_date)
         await callback.answer()
 
+
     @dp.message(RoomScheduleStates.waiting_for_date)
     async def room_show_date_message(message: types.Message, state: FSMContext):
         if not is_registered(message.from_user.id):
@@ -836,33 +833,37 @@ async def main() -> None:
             return
 
         api = _get_user_calendar_api(message.from_user.id)
-        events = api.get_room_events(room, d)
+
+        # Получаем периоды занятости через новую функцию
+        busy_periods = api.get_room_busy_periods(room, d)
 
         # Формируем текст ответа
         text = f"🏢 **{room}** – {d.strftime('%d.%m.%Y')}\n\n"
         
-        if events is not None:
-            # Есть доступ к календарю комнаты
-            if events:
-                text += "\n".join([format_room_event(e) for e in events])
+        if busy_periods is not None:
+            # Успешно получили периоды занятости
+            if busy_periods:
+                text += "**Периоды занятости:**\n"
+                for start_dt, end_dt in busy_periods:
+                    start_time = start_dt.strftime("%H:%M")
+                    end_time = end_dt.strftime("%H:%M")
+                    text += f"{start_time} - {end_time} - занята\n"
             else:
-                text += "📭 На этот день бронирований нет."
-        else:
-            # Нет доступа к календарю, проверяем через GetFreeBusyInfo
-            day_start = datetime.combine(d, time.min)
-            day_end = datetime.combine(d, time.max)
-            day_start = api._make_tz_aware(day_start)
-            day_end = api._make_tz_aware(day_end)
-            
-            available, msg = api.is_room_available(room, day_start, day_end)
-            if available:
                 text += "✅ Свободна на весь день."
-            else:
-                text += f"⚠️ {msg}"
-                text += "\n\n(Подробное расписание недоступно из-за ограничений доступа)"
+        else:
+            # Нет доступа к календарю или Free/Busy
+            text += "⚠️ Не удалось получить информацию о занятости переговорки.\n"
+            text += "(Подробное расписание недоступно из-за ограничений доступа)"
 
-        await state.clear()
-        await message.answer(text, parse_mode="Markdown", reply_markup=main_menu())
+        # Возвращаем меню расписания вместо главного меню
+        builder = InlineKeyboardBuilder()
+        builder.button(text="Сегодня", callback_data="room_today_btn")
+        builder.button(text="Выбрать день", callback_data="room_choose_day_btn")
+        builder.button(text="🔙 Назад в меню", callback_data="room_back_main")
+        builder.adjust(1)
+        
+        await message.answer(text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
 
     @dp.callback_query(F.data == "room_book")
     async def room_booking_start(callback: types.CallbackQuery, state: FSMContext):
