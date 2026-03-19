@@ -158,15 +158,15 @@ class CalendarAPI:
 
         return None
 
-    def get_room_freebusy_periods(self, room_name: str, date: date_cls) -> List[Tuple[datetime, datetime]]:
+    def get_room_freebusy_periods(self, room_name: str, date: date_cls) -> Tuple[List[Tuple[datetime, datetime]], List[Tuple[datetime, datetime]]]:
         """
-        Получает периоды занятости комнаты через Free/Busy API.
+        Получает периоды занятости и свободы комнаты через Free/Busy API.
         Этот метод работает БЕЗ прав доступа к календарю комнаты, используя стандартный механизм Exchange.
-        Возвращает список кортежей (start, end) занятых периодов в московском времени.
+        Возвращает кортеж: (список кортежей (start, end) занятых периодов, список кортежей (start, end) свободных периодов) в московском времени.
         """
         if room_name not in self.cfg.rooms:
             logging.warning(f"[FreeBusy] Комната '{room_name}' не найдена в конфигурации")
-            return []
+            return ([], [])
         
         room_email = self.cfg.rooms[room_name]
         logging.info(f"[FreeBusy] Запрос для комнаты: {room_name} ({room_email}), дата: {date}")
@@ -175,10 +175,10 @@ class CalendarAPI:
         start_dt = datetime.combine(date, time.min)
         end_dt = datetime.combine(date, time.max)
         
-        start = self._make_tz_aware(start_dt)
-        end = self._make_tz_aware(end_dt)
+        day_start = self._make_tz_aware(start_dt)
+        day_end = self._make_tz_aware(end_dt)
         
-        logging.info(f"[FreeBusy] Интервал запроса: {start} - {end}")
+        logging.info(f"[FreeBusy] Интервал запроса: {day_start} - {day_end}")
         
         try:
             # Метод 1: Вызов get_free_busy_info с правильным форматом accounts
@@ -189,75 +189,111 @@ class CalendarAPI:
             
             fb_views = self.account.protocol.get_free_busy_info(
                 accounts=[(room_email, 'Optional', False)],  # Передаем кортеж (email, attendee_type, exclude_conflicts)
-                start=start,
-                end=end,
+                start=day_start,
+                end=day_end,
             )
             
             logging.info(f"[FreeBusy] Получено {len(fb_views) if fb_views else 0} ответов")
             
             if not fb_views or len(fb_views) == 0:
                 logging.warning(f"[FreeBusy] Пустой ответ для {room_email}")
-                return []
+                # Если нет ответа - считаем весь день свободным
+                return ([], [(day_start, day_end)])
             
             fb_view = fb_views[0]
-            busy_periods = []
+            busy_raw = []
             
-            logging.info(f"[FreeBusy] Обработка busy_periods...")
+            logging.info(f"[FreeBusy] Обработка calendar_events...")
             
-            # Извлекаем периоды занятости
-            if hasattr(fb_view, 'busy_periods') and fb_view.busy_periods:
-                logging.info(f"[FreeBusy] Найдено {len(fb_view.busy_periods)} периодов в ответе")
-                for idx, period in enumerate(fb_view.busy_periods):
-                    # Статусы: 'Free', 'Tentative', 'Busy', 'OOF'
+            # Извлекаем периоды занятости из calendar_events
+            if hasattr(fb_view, 'calendar_events') and fb_view.calendar_events:
+                logging.info(f"[FreeBusy] Найдено {len(fb_view.calendar_events)} событий в calendar_events")
+                for idx, event in enumerate(fb_view.calendar_events):
+                    # Статусы: 'Free', 'Tentative', 'Busy', 'OOF', 'WorkingElsewhere'
                     # Нас интересуют все, кроме 'Free'
-                    status = getattr(period, 'free_busy_status', None)
-                    status_value = status.value if status else 'Unknown'
+                    status = getattr(event, 'busy_type', None)
                     
-                    p_start = period.start.astimezone(self.TZ)
-                    p_end = period.end.astimezone(self.TZ)
-                    
-                    logging.info(f"[FreeBusy] Период #{idx+1}: {p_start.strftime('%H:%M')} - {p_end.strftime('%H:%M')} (статус: {status_value})")
-                    
-                    if status and status_value != 'Free':
-                        busy_periods.append((p_start, p_end))
+                    if status and status != 'Free':
+                        e_start = event.start.astimezone(self.TZ)
+                        e_end = event.end.astimezone(self.TZ)
+                        
+                        logging.info(f"[FreeBusy] Событие #{idx+1}: {e_start.strftime('%H:%M')} - {e_end.strftime('%H:%M')} (статус: {status})")
+                        busy_raw.append((e_start, e_end))
             else:
-                logging.warning(f"[FreeBusy] Атрибут busy_periods отсутствует или пуст")
+                logging.warning(f"[FreeBusy] Атрибут calendar_events отсутствует или пуст")
             
             # Сортируем по времени начала
-            busy_periods.sort(key=lambda x: x[0])
+            busy_raw.sort(key=lambda x: x[0])
             
             # Объединяем смежные и перекрывающиеся интервалы
             # Например: 11:30-12:00 и 12:00-13:00 -> 11:30-13:00
-            if not busy_periods:
+            if not busy_raw:
                 logging.info(f"[FreeBusy] для {room_name}: нет занятых периодов (все свободны)")
-                return []
+                return ([], [(day_start, day_end)])
                 
-            merged_periods = [busy_periods[0]]
-            logging.info(f"[FreeBusy] Начало объединения: {len(busy_periods)} периодов")
+            merged_busy = [busy_raw[0]]
+            logging.info(f"[FreeBusy] Начало объединения: {len(busy_raw)} периодов")
             
-            for current_start, current_end in busy_periods[1:]:
-                last_start, last_end = merged_periods[-1]
+            for current_start, current_end in busy_raw[1:]:
+                last_start, last_end = merged_busy[-1]
                 
                 # Если текущий начинается раньше или ровно когда закончился предыдущий
                 if current_start <= last_end:
                     # Продлеваем последний период, если текущий заканчивается позже
                     new_end = max(last_end, current_end)
-                    merged_periods[-1] = (last_start, new_end)
+                    merged_busy[-1] = (last_start, new_end)
                     logging.debug(f"[FreeBusy] Объединение: {last_start.strftime('%H:%M')}-{last_end.strftime('%H:%M')} + {current_start.strftime('%H:%M')}-{current_end.strftime('%H:%M')} -> {last_start.strftime('%H:%M')}-{new_end.strftime('%H:%M')}")
                 else:
                     # Добавляем новый отдельный период
-                    merged_periods.append((current_start, current_end))
+                    merged_busy.append((current_start, current_end))
                     logging.debug(f"[FreeBusy] Новый период: {current_start.strftime('%H:%M')}-{current_end.strftime('%H:%M')}")
             
-            logging.info(f"[FreeBusy] для {room_name}: найдено {len(busy_periods)} периодов, объединено в {len(merged_periods)}")
-            for i, (s, e) in enumerate(merged_periods):
-                logging.info(f"[FreeBusy] Итоговый период [{i+1}]: {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+            logging.info(f"[FreeBusy] для {room_name}: найдено {len(busy_raw)} периодов, объединено в {len(merged_busy)}")
+            for i, (s, e) in enumerate(merged_busy):
+                logging.info(f"[FreeBusy] Занятый период [{i+1}]: {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
             
-            return merged_periods
+            # Вычисляем свободные интервалы
+            free_intervals = self._get_free_intervals(merged_busy, day_start, day_end)
+            
+            logging.info(f"[FreeBusy] для {room_name}: найдено {len(free_intervals)} свободных периодов")
+            for i, (s, e) in enumerate(free_intervals):
+                logging.info(f"[FreeBusy] Свободный период [{i+1}]: {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+            
+            return (merged_busy, free_intervals)
             
         except Exception as e:
             logging.error(f"[FreeBusy] Критическая ошибка для {room_email}: {type(e).__name__}: {e}", exc_info=True)
-            return []
+            return ([], [])
+
+    def _get_free_intervals(self, busy_intervals: List[Tuple[datetime, datetime]], day_start: datetime, day_end: datetime) -> List[Tuple[datetime, datetime]]:
+        """
+        Вычисляет свободные интервалы на основе занятых.
+        busy_intervals: список объединённых занятых интервалов (start, end)
+        day_start, day_end: границы дня
+        Возвращает список свободных интервалов (start, end)
+        """
+        if not busy_intervals:
+            # Весь день свободен
+            return [(day_start, day_end)]
+        
+        free = []
+        
+        # Интервал от начала дня до первого занятия
+        if busy_intervals[0][0] > day_start:
+            free.append((day_start, busy_intervals[0][0]))
+        
+        # Промежутки между занятиями
+        for i in range(len(busy_intervals) - 1):
+            free_start = busy_intervals[i][1]
+            free_end = busy_intervals[i + 1][0]
+            if free_end > free_start:  # Если есть промежуток
+                free.append((free_start, free_end))
+        
+        # Интервал от последнего занятия до конца дня
+        if busy_intervals[-1][1] < day_end:
+            free.append((busy_intervals[-1][1], day_end))
+        
+        return free
 
 
     def is_room_available(self, room_name: str, start: datetime, end: datetime) -> Tuple[bool, str]:
@@ -283,21 +319,24 @@ class CalendarAPI:
                 end=ews_end,
             )
             
-            # Анализируем результат
+            # Анализируем результат через calendar_events (как в успешном тестовом скрипте)
             for status in free_busy_info:
-                # Если есть занятые периоды в запрошенном интервале
-                if hasattr(status, 'busy_periods') and status.busy_periods:
-                    for period in status.busy_periods:
-                        # Проверяем пересечение с нашим интервалом
-                        if not (period.end <= ews_start or period.start >= ews_end):
-                            # Нашли конфликт
-                            conflict_start = max(period.start, ews_start)
-                            conflict_end = min(period.end, ews_end)
-                            return (
-                                False,
-                                f"Комната занята: {conflict_start.strftime('%H:%M')}-{conflict_end.strftime('%H:%M')} "
-                                f"(Конфликт с существующим бронированием)"
-                            )
+                # Проверяем calendar_events вместо busy_periods
+                if hasattr(status, 'calendar_events') and status.calendar_events:
+                    for event in status.calendar_events:
+                        # Статусы: 'Free', 'Tentative', 'Busy', 'OOF', 'WorkingElsewhere'
+                        busy_type = getattr(event, 'busy_type', None)
+                        if busy_type and busy_type != 'Free':
+                            # Проверяем пересечение с нашим интервалом
+                            if not (event.end <= ews_start or event.start >= ews_end):
+                                # Нашли конфликт
+                                conflict_start = max(event.start, ews_start)
+                                conflict_end = min(event.end, ews_end)
+                                return (
+                                    False,
+                                    f"Комната занята: {conflict_start.strftime('%H:%M')}-{conflict_end.strftime('%H:%M')} "
+                                    f"(Конфликт с существующим бронированием)"
+                                )
             
             # Если занятых периодов нет или они не пересекаются
             return True, "Слот свободен."
@@ -305,6 +344,7 @@ class CalendarAPI:
         except Exception as e:
             # Если GetFreeBusyInfo не сработал, пробуем старый метод (как запасной)
             # Это может быть менее надежно, но лучше чем ничего
+            logging.warning(f"[is_room_available] GetFreeBusyInfo failed: {type(e).__name__}: {e}")
             events = self.get_room_events(room_name, start.date())
             if events is None:
                 return False, "Не удалось проверить занятость (нет доступа к календарю или Free/Busy)."
@@ -330,7 +370,7 @@ class CalendarAPI:
     def get_room_busy_periods(self, room_name: str, date: date_cls) -> Optional[List[Tuple[datetime, datetime]]]:
         """
         Получает все периоды занятости переговорки за указанный день.
-        Использует GetFreeBusyInfo для получения информации о занятости.
+        Использует GetFreeBusyInfo для получения информации о занятости через calendar_events.
         Возвращает список кортежей (start, end) - периоды когда комната занята.
         Если нет доступа - возвращает None.
         Объединяет смежные или перекрывающиеся периоды.
@@ -355,12 +395,15 @@ class CalendarAPI:
             
             busy_periods = []
             for status in free_busy_info:
-                if hasattr(status, 'busy_periods') and status.busy_periods:
-                    for period in status.busy_periods:
-                        # Сохраняем периоды занятости, конвертируя в наш часовой пояс
-                        period_start = period.start.astimezone(self.TZ) if hasattr(period.start, 'astimezone') else period.start
-                        period_end = period.end.astimezone(self.TZ) if hasattr(period.end, 'astimezone') else period.end
-                        busy_periods.append((period_start, period_end))
+                # Используем calendar_events вместо busy_periods (как в успешном тестовом скрипте)
+                if hasattr(status, 'calendar_events') and status.calendar_events:
+                    for event in status.calendar_events:
+                        busy_type = getattr(event, 'busy_type', None)
+                        if busy_type and busy_type != 'Free':
+                            # Сохраняем периоды занятости, конвертируя в наш часовой пояс
+                            period_start = event.start.astimezone(self.TZ) if hasattr(event.start, 'astimezone') else event.start
+                            period_end = event.end.astimezone(self.TZ) if hasattr(event.end, 'astimezone') else event.end
+                            busy_periods.append((period_start, period_end))
             
             # Сортируем периоды по времени начала
             busy_periods.sort(key=lambda x: x[0])
