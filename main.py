@@ -104,7 +104,7 @@ def main_menu() -> ReplyKeyboardMarkup:
     builder.add(KeyboardButton(text="📅 Расписание"))
     builder.add(KeyboardButton(text="➕ Создать встречу"))
     builder.add(KeyboardButton(text="🏢 Переговорки"))
-    builder.add(KeyboardButton(text="✏️ Изменить встречи"))
+    builder.add(KeyboardButton(text="🗑 Удалить/перенести"))
     builder.add(KeyboardButton(text="👤 Мой профиль"))
     builder.add(KeyboardButton(text="❓ Помощь"))
     builder.adjust(2)
@@ -269,11 +269,6 @@ async def main() -> None:
     async def cancel_any(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("✅ Действие отменено. Главное меню:", reply_markup=main_menu())
-
-    @dp.message(F.text == "◀️ Назад")
-    async def back_to_main_from_button(message: types.Message, state: FSMContext):
-        await state.clear()
-        await message.answer("✅ Возврат в главное меню:", reply_markup=main_menu())
 
     # ===== Регистрация =====
     @dp.message(RegisterStates.waiting_for_contact)
