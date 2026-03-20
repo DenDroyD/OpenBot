@@ -9,15 +9,14 @@ tz = pytz.timezone("Europe/Moscow")
 
 
 def get_calendar_emoji_for_date(target_date) -> str:
-    """
-    Возвращает эмодзи календаря. Для единообразия используем 📅.
-    (В будущем можно добавить поддержку эмодзи с числами, если появятся в Unicode.)
-    """
+    day = target_date.day
+    # Можно оставить как есть или добавить различие, например, для первого дня
+    # if day == 1:
+    #     return '📆'
     return '📅'
 
 
 def parse_natural_date(text: str):
-    """Парсит дату из естественного языка."""
     text_lower = text.strip().lower()
     if text_lower == "сегодня":
         return datetime.now(tz).date()
@@ -86,9 +85,6 @@ def format_room_event(event) -> str:
 
 
 def format_time_line(free_periods: list, busy_periods: list, day_start: str = "09:00", day_end: str = "20:00") -> str:
-    """
-    Формирует текстовую визуальную временную шкалу для расписания комнаты.
-    """
     if not free_periods and not busy_periods:
         return ""
     all_periods = []
