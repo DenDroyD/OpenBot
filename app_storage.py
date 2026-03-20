@@ -104,4 +104,3 @@ def get_user(tg_user_id: int) -> Optional[RegisteredUser]:
 
 def is_registered(tg_user_id: int) -> bool:
     return get_user(tg_user_id) is not None
-

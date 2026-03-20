@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz, process   # уже импортировано в начале
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,7 @@ def find_employees_by_fio_multiple(
     Поиск нескольких сотрудников по ФИО для выбора пользователем.
     Возвращает список кортежей (Employee, score).
     """
-    from rapidfuzz import process, fuzz
+    # Импорт уже в начале файла, повторный импорт удалён
     
     q = (fio_query or "").strip().lower()
     if not q:
@@ -166,4 +166,3 @@ def find_employees_by_fio_multiple(
     # Общий поиск
     matches = process.extract(q, choices, scorer=fuzz.WRatio, score_cutoff=score_cutoff, limit=limit)
     return [(fio_index[key], int(score)) for key, score, _ in matches]
-
