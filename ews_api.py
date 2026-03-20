@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, EWSTimeZone, NTLM
-from exchangelib.items import CalendarItem, SEND_TO_ALL_AND_SAVE_COPY, SEND_TO_NONE
+from exchangelib.items import CalendarItem
 from exchangelib.properties import Attendee, Mailbox
 from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
 
@@ -505,7 +505,7 @@ class CalendarAPI:
         )
         try:
             # Отправляем приглашения всем участникам (включая комнату)
-            event.save(send_meeting_invitations=SEND_TO_ALL_AND_SAVE_COPY)
+            event.save(send_meeting_invitations='SendToAllAndSaveCopy')
             return True, "✅ Встреча успешно создана! Приглашения отправлены.", event.id
         except Exception as e:
             error_msg = str(e)
@@ -532,7 +532,7 @@ class CalendarAPI:
                 logging.info(f"[Cancel] Встреча найдена: {item.subject}. Отправка уведомлений...")
                 # Отправляем уведомления об отмене всем участникам и сохраняем копию у организатора
                 # Используем правильный параметр send_meeting_cancellations
-                item.delete(send_meeting_cancellations=SEND_TO_ALL_AND_SAVE_COPY)
+                item.delete(send_meeting_cancellations='SendToAllAndSaveCopy')
                 logging.info(f"[Cancel] Встреча {event_id} успешно удалена, уведомления отправлены.")
                 return True
             else:
@@ -552,7 +552,7 @@ class CalendarAPI:
                 return False, "❌ Встреча не найдена."
             item.start = self._make_tz_aware(new_start)
             item.end = self._make_tz_aware(new_end)
-            item.save(send_meeting_invitations=SEND_TO_ALL_AND_SAVE_COPY)
+            item.save(send_meeting_invitations='SendToAllAndSaveCopy')
             return True, "✅ Встреча успешно перенесена."
         except Exception as e:
             return False, f"❌ Не удалось перенести: {e}"
