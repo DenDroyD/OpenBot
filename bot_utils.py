@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
 import calendar
+import re
 
 import dateparser
 import pytz
@@ -8,11 +9,19 @@ import pytz
 tz = pytz.timezone("Europe/Moscow")
 
 
+def escape_markdown(text: str) -> str:
+    """Экранирует специальные символы Markdown для Telegram."""
+    if not text:
+        return ""
+    # Экранируем символы, которые используются в Markdown-разметке Telegram
+    chars = r'_*[]()~`>#+-=|{}.!'
+    for ch in chars:
+        text = text.replace(ch, f'\\{ch}')
+    return text
+
+
 def get_calendar_emoji_for_date(target_date) -> str:
     day = target_date.day
-    # Можно оставить как есть или добавить различие, например, для первого дня
-    # if day == 1:
-    #     return '📆'
     return '📅'
 
 
@@ -48,7 +57,7 @@ def format_event(event, show_header: bool = True, include_date: bool = False) ->
     tz_local = pytz.timezone("Europe/Moscow")
     start = event.start.astimezone(tz_local).strftime("%H:%M")
     end = event.end.astimezone(tz_local).strftime("%H:%M")
-    subject = event.subject or "Без темы"
+    subject = escape_markdown(event.subject or "Без темы")
     
     date_str = ""
     if include_date:
@@ -56,13 +65,16 @@ def format_event(event, show_header: bool = True, include_date: bool = False) ->
         calendar_emoji = get_calendar_emoji_for_date(event_date)
         date_str = f"{calendar_emoji} {event_date.strftime('%d.%m.%Y')} | "
     
-    location = f" 📍 {event.location}" if getattr(event, "location", None) else ""
+    location = ""
+    if getattr(event, "location", None):
+        location = f" 📍 {escape_markdown(event.location)}"
+    
     organizer = ""
     if getattr(event, "organizer", None):
         name = event.organizer.name or event.organizer.email_address
         if "@" in name and len(name) > 20:
             name = name.split("@")[0] + "@..."
-        organizer = f" 👤 {name}"
+        organizer = f" 👤 {escape_markdown(name)}"
     
     if show_header:
         return f"{date_str}`{start}-{end}` | {subject}{location}{organizer}"
@@ -74,13 +86,13 @@ def format_room_event(event) -> str:
     tz_local = pytz.timezone("Europe/Moscow")
     start = event.start.astimezone(tz_local).strftime("%H:%M")
     end = event.end.astimezone(tz_local).strftime("%H:%M")
-    subject = event.subject or "Без темы"
+    subject = escape_markdown(event.subject or "Без темы")
     organizer = ""
     if getattr(event, "organizer", None):
         name = event.organizer.name or event.organizer.email_address
         if "@" in name and len(name) > 20:
             name = name.split("@")[0] + "@..."
-        organizer = f" 👤 {name}"
+        organizer = f" 👤 {escape_markdown(name)}"
     return f"`{start}-{end}` | {subject}{organizer}".strip()
 
 
